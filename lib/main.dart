@@ -51,15 +51,103 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-// ---------- STUDENT SCREEN ----------
+// ---------- STUDENT SCREEN (now shows Registration) ----------
 class StudentScreen extends StatelessWidget {
   const StudentScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    return const RegistrationScreen();
+  }
+}
+
+// ---------- REGISTRATION SCREEN ----------
+class RegistrationScreen extends StatefulWidget {
+  const RegistrationScreen({super.key});
+
+  @override
+  State<RegistrationScreen> createState() => _RegistrationScreenState();
+}
+
+class _RegistrationScreenState extends State<RegistrationScreen> {
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController classController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController phoneController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Student')),
-      body: const Center(child: Text('Welcome, Student!')),
+      appBar: AppBar(title: const Text('Student Registration')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Full Name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: classController,
+                decoration: const InputDecoration(
+                  labelText: 'Class',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Phone Number',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              ElevatedButton(
+                onPressed: () {
+                  print('Name: ${nameController.text}');
+                  print('Class: ${classController.text}');
+                  print('Email: ${emailController.text}');
+                  print('Phone: ${phoneController.text}');
+                  print('Password: ${passwordController.text}');
+                },
+                child: const Text('Register'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
