@@ -369,7 +369,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             builder: (context) => const VowelsScreen(),
                           ),
                         ).then((_) {
-                          // When we come back from Vowels, refresh the Dashboard
+                          setState(() {});
+                        });
+                      } else if (module['title'] == 'Consonants') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ConsonantsScreen(),
+                          ),
+                        ).then((_) {
                           setState(() {});
                         });
                       } else {
@@ -563,6 +571,171 @@ class _VowelsScreenState extends State<VowelsScreen> {
                               Icons.check_circle,
                               color: Colors.green,
                               size: 20,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------- CONSONANTS SCREEN ----------
+class ConsonantsScreen extends StatefulWidget {
+  const ConsonantsScreen({super.key});
+
+  @override
+  State<ConsonantsScreen> createState() => _ConsonantsScreenState();
+}
+
+class _ConsonantsScreenState extends State<ConsonantsScreen> {
+  final FlutterTts flutterTts = FlutterTts();
+
+  // All 36 Malayalam consonants with their English pronunciation
+  final List<Map<String, String>> consonants = [
+    {'letter': 'ക', 'sound': 'ka'},
+    {'letter': 'ഖ', 'sound': 'kha'},
+    {'letter': 'ഗ', 'sound': 'ga'},
+    {'letter': 'ഘ', 'sound': 'gha'},
+    {'letter': 'ങ', 'sound': 'nga'},
+    {'letter': 'ച', 'sound': 'cha'},
+    {'letter': 'ഛ', 'sound': 'chha'},
+    {'letter': 'ജ', 'sound': 'ja'},
+    {'letter': 'ഝ', 'sound': 'jha'},
+    {'letter': 'ഞ', 'sound': 'nja'},
+    {'letter': 'ട', 'sound': 'ta'},
+    {'letter': 'ഠ', 'sound': 'tha'},
+    {'letter': 'ഡ', 'sound': 'da'},
+    {'letter': 'ഢ', 'sound': 'dha'},
+    {'letter': 'ണ', 'sound': 'na'},
+    {'letter': 'ത', 'sound': 'tha'},
+    {'letter': 'ഥ', 'sound': 'thha'},
+    {'letter': 'ദ', 'sound': 'dha'},
+    {'letter': 'ധ', 'sound': 'dhha'},
+    {'letter': 'ന', 'sound': 'na'},
+    {'letter': 'പ', 'sound': 'pa'},
+    {'letter': 'ഫ', 'sound': 'pha'},
+    {'letter': 'ബ', 'sound': 'ba'},
+    {'letter': 'ഭ', 'sound': 'bha'},
+    {'letter': 'മ', 'sound': 'ma'},
+    {'letter': 'യ', 'sound': 'ya'},
+    {'letter': 'ര', 'sound': 'ra'},
+    {'letter': 'ല', 'sound': 'la'},
+    {'letter': 'വ', 'sound': 'va'},
+    {'letter': 'ശ', 'sound': 'sha'},
+    {'letter': 'ഷ', 'sound': 'sha'},
+    {'letter': 'സ', 'sound': 'sa'},
+    {'letter': 'ഹ', 'sound': 'ha'},
+    {'letter': 'ള', 'sound': 'la'},
+    {'letter': 'ഴ', 'sound': 'zha'},
+    {'letter': 'റ', 'sound': 'ra'},
+  ];
+
+  final Set<int> completed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    flutterTts.setLanguage("ml-IN");
+  }
+
+  @override
+  void dispose() {
+    flutterTts.stop();
+    super.dispose();
+  }
+
+  void speakAndMark(int index) async {
+    final letter = consonants[index]['letter']!;
+    await flutterTts.speak(letter);
+
+    setState(() {
+      completed.add(index);
+
+      // If all consonants are done, update shared progress tracker
+      if (completed.length == consonants.length) {
+        ProgressData.instance.consonantsDone = true;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool allDone = completed.length == consonants.length;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Consonants')),
+      body: Column(
+        children: [
+          if (allDone)
+            Container(
+              width: double.infinity,
+              color: Colors.green[100],
+              padding: const EdgeInsets.all(12),
+              child: const Text(
+                '🎉 Module Complete! Combined Forms unlocked.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(16),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4, // 4 per row since there are more letters
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+              ),
+              itemCount: consonants.length,
+              itemBuilder: (context, index) {
+                final bool done = completed.contains(index);
+
+                return GestureDetector(
+                  onTap: () => speakAndMark(index),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: done ? Colors.green[50] : Colors.purple[50],
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: done ? Colors.green : Colors.grey[300]!,
+                        width: done ? 2 : 1,
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                consonants[index]['letter']!,
+                                style: const TextStyle(fontSize: 26),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                consonants[index]['sound']!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (done)
+                          const Positioned(
+                            top: 4,
+                            right: 4,
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                              size: 16,
                             ),
                           ),
                       ],
