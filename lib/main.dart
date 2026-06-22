@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 
 void main() {
   runApp(const MyApp());
@@ -310,14 +311,19 @@ class DashboardScreen extends StatelessWidget {
                   return GestureDetector(
                     onTap: () {
                       if (locked) {
-                        // Show a small message if the module is locked
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Complete previous module first!'),
                           ),
                         );
+                      } else if (module['title'] == 'Vowels') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const VowelsScreen(),
+                          ),
+                        );
                       } else {
-                        // We'll add real navigation to each module later
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text('Opening ${module['title']}...'),
@@ -371,6 +377,148 @@ class DashboardScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ---------- VOWELS SCREEN ----------
+class VowelsScreen extends StatefulWidget {
+  const VowelsScreen({super.key});
+
+  @override
+  State<VowelsScreen> createState() => _VowelsScreenState();
+}
+
+class _VowelsScreenState extends State<VowelsScreen> {
+  final FlutterTts flutterTts = FlutterTts(); // the "voice" engine
+
+  // Each vowel has: the Malayalam letter, and how to pronounce it
+  final List<Map<String, String>> vowels = [
+    {'letter': 'അ', 'sound': 'a'},
+    {'letter': 'ആ', 'sound': 'aa'},
+    {'letter': 'ഇ', 'sound': 'i'},
+    {'letter': 'ഈ', 'sound': 'ii'},
+    {'letter': 'ഉ', 'sound': 'u'},
+    {'letter': 'ഊ', 'sound': 'uu'},
+    {'letter': 'ഋ', 'sound': 'ru'},
+    {'letter': 'എ', 'sound': 'e'},
+    {'letter': 'ഏ', 'sound': 'ee'},
+    {'letter': 'ഐ', 'sound': 'ai'},
+    {'letter': 'ഒ', 'sound': 'o'},
+    {'letter': 'ഓ', 'sound': 'oo'},
+    {'letter': 'ഔ', 'sound': 'au'},
+    {'letter': 'അം', 'sound': 'am'},
+    {'letter': 'അഃ', 'sound': 'aha'},
+  ];
+
+  // Tracks which letters have been tapped already
+  final Set<int> completed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    flutterTts.setLanguage("ml-IN"); // Malayalam language code
+  }
+
+  @override
+  void dispose() {
+    flutterTts.stop();
+    super.dispose();
+  }
+
+  void speakAndMark(int index) async {
+    final letter = vowels[index]['letter']!;
+    await flutterTts.speak(letter); // plays the FULL sound of the letter
+
+    setState(() {
+      completed.add(index); // mark this letter as done
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool allDone = completed.length == vowels.length;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Vowels')),
+      body: Column(
+        children: [
+          if (allDone)
+            Container(
+              width: double.infinity,
+              color: Colors.green[100],
+              padding: const EdgeInsets.all(12),
+              child: const Text(
+                '🎉 Module Complete! Consonants unlocked.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(16),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3, // 3 letters per row
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+              ),
+              itemCount: vowels.length,
+              itemBuilder: (context, index) {
+                final bool done = completed.contains(index);
+
+                return GestureDetector(
+                  onTap: () => speakAndMark(index),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: done ? Colors.green[50] : Colors.purple[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: done ? Colors.green : Colors.grey[300]!,
+                        width: done ? 2 : 1,
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                vowels[index]['letter']!,
+                                style: const TextStyle(
+                                  fontSize: 32,
+                                ), // big Malayalam letter
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                vowels[index]['sound']!,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey, // smaller English text
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (done)
+                          const Positioned(
+                            top: 6,
+                            right: 6,
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                              size: 20,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
