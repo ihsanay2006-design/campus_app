@@ -225,15 +225,153 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-// ---------- DASHBOARD SCREEN (placeholder for now) ----------
+// ---------- DASHBOARD SCREEN ----------
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // Progress is 0% for now — we will calculate this for real later
+    double progress = 0.0;
+
+    // List of all modules, in order, with their lock status
+    final List<Map<String, dynamic>> modules = [
+      {
+        'title': 'Vowels',
+        'icon': '🔤',
+        'locked': false,
+      }, // first one is unlocked
+      {'title': 'Consonants', 'icon': '🔠', 'locked': true},
+      {'title': 'Combined Forms', 'icon': '🔗', 'locked': true},
+      {'title': 'Words', 'icon': '📖', 'locked': true},
+      {'title': 'Quiz', 'icon': '📝', 'locked': true},
+      {'title': 'Certificate', 'icon': '🏆', 'locked': true},
+    ];
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Malayalam Learning App')),
-      body: const Center(child: Text('Dashboard coming soon...')),
+      appBar: AppBar(
+        // Left side: coconut tree + title
+        title: const Row(
+          children: [
+            Text('🌴 ', style: TextStyle(fontSize: 22)),
+            Text('Malayalam Learning App', style: TextStyle(fontSize: 18)),
+          ],
+        ),
+        // Right side: logout button
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () {
+              // Goes back to the very first screen and removes everything in between
+              Navigator.popUntil(context, (route) => route.isFirst);
+            },
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ---- Overall Progress ----
+            const Text(
+              'Overall Progress',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: progress, // 0.0 to 1.0
+              minHeight: 12,
+              backgroundColor: Colors.grey[300],
+            ),
+            const SizedBox(height: 4),
+            Text('${(progress * 100).toStringAsFixed(0)}%'),
+            const SizedBox(height: 24),
+
+            // ---- Modules Grid ----
+            const Text(
+              'Modules',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2, // 2 boxes per row
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                ),
+                itemCount: modules.length,
+                itemBuilder: (context, index) {
+                  final module = modules[index];
+                  final bool locked = module['locked'];
+
+                  return GestureDetector(
+                    onTap: () {
+                      if (locked) {
+                        // Show a small message if the module is locked
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Complete previous module first!'),
+                          ),
+                        );
+                      } else {
+                        // We'll add real navigation to each module later
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Opening ${module['title']}...'),
+                          ),
+                        );
+                      }
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: locked ? Colors.grey[200] : Colors.purple[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  module['icon'],
+                                  style: const TextStyle(fontSize: 32),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  module['title'],
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: locked ? Colors.grey : Colors.black,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (locked)
+                            const Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Icon(
+                                Icons.lock,
+                                size: 18,
+                                color: Colors.grey,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
