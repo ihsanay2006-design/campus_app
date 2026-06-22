@@ -1,6 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+// ---------- SHARED PROGRESS TRACKER ----------
+// This object holds the "notice board" that every screen can read/write.
+class ProgressData {
+  // Singleton pattern: only ONE ProgressData exists in the whole app
+  static final ProgressData instance = ProgressData._internal();
+  ProgressData._internal();
+
+  bool vowelsDone = false;
+  bool consonantsDone = false;
+  bool combinedFormsDone = false;
+  bool wordsDone = false;
+  bool quizPassed = false;
+
+  // Calculates overall progress as a percentage (0.0 to 1.0)
+  double get overallProgress {
+    int doneCount = 0;
+    if (vowelsDone) doneCount++;
+    if (consonantsDone) doneCount++;
+    if (combinedFormsDone) doneCount++;
+    if (wordsDone) doneCount++;
+    if (quizPassed) doneCount++;
+    return doneCount / 5; // 5 total stages
+  }
+}
+
 void main() {
   runApp(const MyApp());
 }
@@ -227,26 +252,47 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // ---------- DASHBOARD SCREEN ----------
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    // Progress is 0% for now — we will calculate this for real later
-    double progress = 0.0;
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
 
-    // List of all modules, in order, with their lock status
+class _DashboardScreenState extends State<DashboardScreen> {
+  @override
+  Widget build(BuildContext context) {
+    // Read REAL progress from the shared tracker
+    double progress = ProgressData.instance.overallProgress;
+
+    // List of all modules, with lock status now based on real progress
     final List<Map<String, dynamic>> modules = [
+      {'title': 'Vowels', 'icon': '🔤', 'locked': false}, // always unlocked
       {
-        'title': 'Vowels',
-        'icon': '🔤',
-        'locked': false,
-      }, // first one is unlocked
-      {'title': 'Consonants', 'icon': '🔠', 'locked': true},
-      {'title': 'Combined Forms', 'icon': '🔗', 'locked': true},
-      {'title': 'Words', 'icon': '📖', 'locked': true},
-      {'title': 'Quiz', 'icon': '📝', 'locked': true},
-      {'title': 'Certificate', 'icon': '🏆', 'locked': true},
+        'title': 'Consonants',
+        'icon': '🔠',
+        'locked': !ProgressData.instance.vowelsDone,
+      },
+      {
+        'title': 'Combined Forms',
+        'icon': '🔗',
+        'locked': !ProgressData.instance.consonantsDone,
+      },
+      {
+        'title': 'Words',
+        'icon': '📖',
+        'locked': !ProgressData.instance.combinedFormsDone,
+      },
+      {
+        'title': 'Quiz',
+        'icon': '📝',
+        'locked': !ProgressData.instance.wordsDone,
+      },
+      {
+        'title': 'Certificate',
+        'icon': '🏆',
+        'locked': !ProgressData.instance.quizPassed,
+      },
     ];
 
     return Scaffold(
@@ -322,7 +368,10 @@ class DashboardScreen extends StatelessWidget {
                           MaterialPageRoute(
                             builder: (context) => const VowelsScreen(),
                           ),
-                        );
+                        ).then((_) {
+                          // When we come back from Vowels, refresh the Dashboard
+                          setState(() {});
+                        });
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -429,10 +478,15 @@ class _VowelsScreenState extends State<VowelsScreen> {
 
   void speakAndMark(int index) async {
     final letter = vowels[index]['letter']!;
-    await flutterTts.speak(letter); // plays the FULL sound of the letter
+    await flutterTts.speak(letter);
 
     setState(() {
-      completed.add(index); // mark this letter as done
+      completed.add(index);
+
+      // If all vowels are now done, update the shared progress tracker
+      if (completed.length == vowels.length) {
+        ProgressData.instance.vowelsDone = true;
+      }
     });
   }
 
