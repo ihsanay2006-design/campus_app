@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 // ---------- SHARED PROGRESS TRACKER ----------
 // This object holds the "notice board" that every screen can read/write.
@@ -481,23 +484,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ).then((_) {
                           setState(() {});
                         });
-                      }else if (module['title'] == 'Words') {
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (context) => const WordsScreen()),
-  ).then((_) { setState(() {}); });
-} else if (module['title'] == 'Quiz') {
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (context) => const QuizScreen()),
-  ).then((_) { setState(() {}); });
-} else {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text('Opening ${module['title']}...'),
-    ),
-  );
-}
+                      } else if (module['title'] == 'Words') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const WordsScreen(),
+                          ),
+                        ).then((_) {
+                          setState(() {});
+                        });
+                      } else if (module['title'] == 'Quiz') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const QuizScreen(),
+                          ),
+                        ).then((_) {
+                          setState(() {});
+                        });
+                      } else if (module['title'] == 'Certificate') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const CertificateScreen(),
+                          ),
+                        ).then((_) {
+                          setState(() {});
+                        });
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Opening ${module['title']}...'),
+                          ),
+                        );
+                      }
                     },
                     child: Container(
                       decoration: BoxDecoration(
@@ -1982,6 +2002,7 @@ class _WordCategoryScreenState extends State<WordCategoryScreen> {
     );
   }
 }
+
 // ---------- QUIZ SCREEN ----------
 class QuizScreen extends StatefulWidget {
   const QuizScreen({super.key});
@@ -2306,6 +2327,198 @@ class _QuizScreenState extends State<QuizScreen> {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- CERTIFICATE SCREEN ----------
+class CertificateScreen extends StatefulWidget {
+  const CertificateScreen({super.key});
+  @override
+  State<CertificateScreen> createState() => _CertificateScreenState();
+}
+
+class _CertificateScreenState extends State<CertificateScreen> {
+  final TextEditingController nameController = TextEditingController();
+  bool generated = false;
+  String studentName = '';
+
+  Future<void> generateAndDownload() async {
+    final name = nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter your name!')));
+      return;
+    }
+
+    setState(() {
+      studentName = name;
+      generated = true;
+    });
+
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4.landscape,
+        build: (pw.Context context) {
+          return pw.Container(
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.purple800, width: 8),
+            ),
+            padding: const pw.EdgeInsets.all(40),
+            child: pw.Column(
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text(
+                  '🌴 Malayalam Learning App',
+                  style: pw.TextStyle(
+                    fontSize: 20,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.purple800,
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+                pw.Text(
+                  'CERTIFICATE OF COMPLETION',
+                  style: pw.TextStyle(
+                    fontSize: 28,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.purple900,
+                  ),
+                ),
+                pw.SizedBox(height: 30),
+                pw.Text(
+                  'This is to certify that',
+                  style: const pw.TextStyle(fontSize: 16),
+                ),
+                pw.SizedBox(height: 16),
+                pw.Text(
+                  name,
+                  style: pw.TextStyle(
+                    fontSize: 32,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.deepPurple,
+                  ),
+                ),
+                pw.SizedBox(height: 16),
+                pw.Text(
+                  'has successfully completed the Malayalam Learning Course',
+                  style: const pw.TextStyle(fontSize: 16),
+                  textAlign: pw.TextAlign.center,
+                ),
+                pw.SizedBox(height: 8),
+                pw.Text(
+                  'covering Vowels, Consonants, Combined Forms, Words and Quiz',
+                  style: const pw.TextStyle(
+                    fontSize: 13,
+                    color: PdfColors.grey700,
+                  ),
+                  textAlign: pw.TextAlign.center,
+                ),
+                pw.SizedBox(height: 30),
+                pw.Text(
+                  'Date: ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+                  style: const pw.TextStyle(fontSize: 14),
+                ),
+                pw.SizedBox(height: 40),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                  children: [
+                    pw.Column(
+                      children: [
+                        pw.Container(
+                          width: 150,
+                          height: 1,
+                          color: PdfColors.black,
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          'Student Signature',
+                          style: const pw.TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    pw.Column(
+                      children: [
+                        pw.Container(
+                          width: 150,
+                          height: 1,
+                          color: PdfColors.black,
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          'Academy Seal',
+                          style: const pw.TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Certificate')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.emoji_events, size: 80, color: Colors.amber),
+            const SizedBox(height: 16),
+            const Text(
+              '🎉 You passed the Quiz!',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Enter your name to generate your certificate',
+              style: TextStyle(color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Your Full Name',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.person),
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple,
+                  padding: const EdgeInsets.all(14),
+                ),
+                onPressed: generateAndDownload,
+                icon: const Icon(Icons.download, color: Colors.white),
+                label: const Text(
+                  'Download Certificate',
+                  style: TextStyle(color: Colors.white, fontSize: 16),
+                ),
+              ),
+            ),
           ],
         ),
       ),
