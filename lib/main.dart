@@ -161,7 +161,12 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
-                // Faculty screen will go here later
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const FacultyScreen(),
+                  ),
+                );
               },
               child: const Text('Faculty'),
             ),
@@ -2518,6 +2523,37 @@ class _CertificateScreenState extends State<CertificateScreen> {
                   style: TextStyle(color: Colors.white, fontSize: 16),
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- FACULTY SCREEN ----------
+class FacultyScreen extends StatelessWidget {
+  const FacultyScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Faculty Portal')),
+      body: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('🧑‍🏫', style: TextStyle(fontSize: 60)),
+            SizedBox(height: 20),
+            Text(
+              'Coming Soon!',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Faculty portal is under development.',
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
