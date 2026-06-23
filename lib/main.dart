@@ -26,6 +26,98 @@ class ProgressData {
   }
 }
 
+// ---------- REUSABLE MALAYALAM CARD WIDGET ----------
+class MalayalamCard extends StatelessWidget {
+  final String malayalamText;
+  final String englishText;
+  final String example;
+  final String meaning;
+  final String emoji;
+  final bool isCompleted;
+  final bool isPlaying;
+  final VoidCallback onTap;
+
+  const MalayalamCard({
+    super.key,
+    required this.malayalamText,
+    required this.englishText,
+    required this.example,
+    required this.meaning,
+    required this.emoji,
+    required this.isCompleted,
+    required this.onTap,
+    this.isPlaying = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        decoration: BoxDecoration(
+          color: isPlaying
+              ? Colors.orange[100]
+              : (isCompleted ? Colors.green[50] : Colors.purple[50]),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isPlaying
+                ? Colors.orange
+                : (isCompleted ? Colors.green : Colors.grey[300]!),
+            width: isPlaying || isCompleted ? 2 : 1,
+          ),
+        ),
+        padding: const EdgeInsets.all(8),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    malayalamText,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    englishText,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(emoji, style: const TextStyle(fontSize: 16)),
+                  Text(
+                    example,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  Text(
+                    meaning,
+                    style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            if (isCompleted)
+              const Positioned(
+                top: 0,
+                right: 0,
+                child: Icon(Icons.check_circle, color: Colors.green, size: 16),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 void main() {
   runApp(const MyApp());
 }
@@ -380,6 +472,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ).then((_) {
                           setState(() {});
                         });
+                      } else if (module['title'] == 'Combined Forms') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const CombinedFormsScreen(),
+                          ),
+                        ).then((_) {
+                          setState(() {});
+                        });
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -452,21 +553,111 @@ class _VowelsScreenState extends State<VowelsScreen> {
 
   // Each vowel has: the Malayalam letter, and how to pronounce it
   final List<Map<String, String>> vowels = [
-    {'letter': 'അ', 'sound': 'a'},
-    {'letter': 'ആ', 'sound': 'aa'},
-    {'letter': 'ഇ', 'sound': 'i'},
-    {'letter': 'ഈ', 'sound': 'ii'},
-    {'letter': 'ഉ', 'sound': 'u'},
-    {'letter': 'ഊ', 'sound': 'uu'},
-    {'letter': 'ഋ', 'sound': 'ru'},
-    {'letter': 'എ', 'sound': 'e'},
-    {'letter': 'ഏ', 'sound': 'ee'},
-    {'letter': 'ഐ', 'sound': 'ai'},
-    {'letter': 'ഒ', 'sound': 'o'},
-    {'letter': 'ഓ', 'sound': 'oo'},
-    {'letter': 'ഔ', 'sound': 'au'},
-    {'letter': 'അം', 'sound': 'am'},
-    {'letter': 'അഃ', 'sound': 'aha'},
+    {
+      'letter': 'അ',
+      'sound': 'a',
+      'example': 'അമ്മ',
+      'meaning': 'Mother',
+      'emoji': '👩',
+    },
+    {
+      'letter': 'ആ',
+      'sound': 'aa',
+      'example': 'ആന',
+      'meaning': 'Elephant',
+      'emoji': '🐘',
+    },
+    {
+      'letter': 'ഇ',
+      'sound': 'i',
+      'example': 'ഇല',
+      'meaning': 'Leaf',
+      'emoji': '🍃',
+    },
+    {
+      'letter': 'ഈ',
+      'sound': 'ii',
+      'example': 'ഈച്ച',
+      'meaning': 'Fly',
+      'emoji': '🪰',
+    },
+    {
+      'letter': 'ഉ',
+      'sound': 'u',
+      'example': 'ഉറുമ്പ്',
+      'meaning': 'Ant',
+      'emoji': '🐜',
+    },
+    {
+      'letter': 'ഊ',
+      'sound': 'uu',
+      'example': 'ഊഞ്ഞാൽ',
+      'meaning': 'Swing',
+      'emoji': '🪢',
+    },
+    {
+      'letter': 'ഋ',
+      'sound': 'ru',
+      'example': 'ഋതു',
+      'meaning': 'Season',
+      'emoji': '🍂',
+    },
+    {
+      'letter': 'എ',
+      'sound': 'e',
+      'example': 'എലി',
+      'meaning': 'Mouse',
+      'emoji': '🐭',
+    },
+    {
+      'letter': 'ഏ',
+      'sound': 'ee',
+      'example': 'ഏണി',
+      'meaning': 'Ladder',
+      'emoji': '🪜',
+    },
+    {
+      'letter': 'ഐ',
+      'sound': 'ai',
+      'example': 'ഐസ്',
+      'meaning': 'Ice',
+      'emoji': '🧊',
+    },
+    {
+      'letter': 'ഒ',
+      'sound': 'o',
+      'example': 'ഒട്ടകം',
+      'meaning': 'Camel',
+      'emoji': '🐫',
+    },
+    {
+      'letter': 'ഓ',
+      'sound': 'oo',
+      'example': 'ഓട്',
+      'meaning': 'Tile',
+      'emoji': '🧱',
+    },
+    {
+      'letter': 'ഔ',
+      'sound': 'au',
+      'example': 'ഔഷധം',
+      'meaning': 'Medicine',
+      'emoji': '💊',
+    },
+    {
+      'letter': 'അം',
+      'sound': 'am',
+      'example': 'പയ്യം',
+      'meaning': 'Cow',
+      'emoji': '🐄',
+    },
+    {
+      'letter': 'അഃ',
+      'sound': 'aha',
+      'example': 'ദുഃഖം',
+      'meaning': 'Sadness',
+      'emoji': '😢',
+    },
   ];
 
   // Tracks which letters have been tapped already
@@ -521,61 +712,23 @@ class _VowelsScreenState extends State<VowelsScreen> {
             child: GridView.builder(
               padding: const EdgeInsets.all(16),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3, // 3 letters per row
+                crossAxisCount: 2, // fewer per row since cards are bigger now
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
+                childAspectRatio: 0.85, // makes cards a bit taller
               ),
               itemCount: vowels.length,
               itemBuilder: (context, index) {
                 final bool done = completed.contains(index);
 
-                return GestureDetector(
+                return MalayalamCard(
+                  malayalamText: vowels[index]['letter']!,
+                  englishText: vowels[index]['sound']!,
+                  example: vowels[index]['example']!,
+                  meaning: vowels[index]['meaning']!,
+                  emoji: vowels[index]['emoji']!,
+                  isCompleted: done,
                   onTap: () => speakAndMark(index),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: done ? Colors.green[50] : Colors.purple[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: done ? Colors.green : Colors.grey[300]!,
-                        width: done ? 2 : 1,
-                      ),
-                    ),
-                    child: Stack(
-                      children: [
-                        Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                vowels[index]['letter']!,
-                                style: const TextStyle(
-                                  fontSize: 32,
-                                ), // big Malayalam letter
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                vowels[index]['sound']!,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey, // smaller English text
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (done)
-                          const Positioned(
-                            top: 6,
-                            right: 6,
-                            child: Icon(
-                              Icons.check_circle,
-                              color: Colors.green,
-                              size: 20,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
                 );
               },
             ),
@@ -736,6 +889,218 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
                               Icons.check_circle,
                               color: Colors.green,
                               size: 16,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------- COMBINED FORMS SCREEN ----------
+class CombinedFormsScreen extends StatefulWidget {
+  const CombinedFormsScreen({super.key});
+
+  @override
+  State<CombinedFormsScreen> createState() => _CombinedFormsScreenState();
+}
+
+class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
+  final FlutterTts flutterTts = FlutterTts();
+
+  // Base consonants (same 36 as before, just the letters)
+  final List<String> baseConsonants = [
+    'ക',
+    'ഖ',
+    'ഗ',
+    'ഘ',
+    'ങ',
+    'ച',
+    'ഛ',
+    'ജ',
+    'ഝ',
+    'ഞ',
+    'ട',
+    'ഠ',
+    'ഡ',
+    'ഢ',
+    'ണ',
+    'ത',
+    'ഥ',
+    'ദ',
+    'ധ',
+    'ന',
+    'പ',
+    'ഫ',
+    'ബ',
+    'ഭ',
+    'മ',
+    'യ',
+    'ര',
+    'ല',
+    'വ',
+    'ശ',
+    'ഷ',
+    'സ',
+    'ഹ',
+    'ള',
+    'ഴ',
+    'റ',
+  ];
+
+  // Vowel signs (the small marks added to a consonant) + their pronunciation suffix
+  // '' (empty) represents the consonant's natural "a" sound with no extra sign
+  final List<Map<String, String>> vowelSigns = [
+    {'sign': '', 'suffix': 'a'},
+    {'sign': 'ാ', 'suffix': 'aa'},
+    {'sign': 'ി', 'suffix': 'i'},
+    {'sign': 'ീ', 'suffix': 'ii'},
+    {'sign': 'ു', 'suffix': 'u'},
+    {'sign': 'ൂ', 'suffix': 'uu'},
+    {'sign': 'ൃ', 'suffix': 'ru'},
+    {'sign': 'െ', 'suffix': 'e'},
+    {'sign': 'േ', 'suffix': 'ee'},
+    {'sign': 'ൈ', 'suffix': 'ai'},
+    {'sign': 'ൊ', 'suffix': 'o'},
+    {'sign': 'ോ', 'suffix': 'oo'},
+    {'sign': 'ൌ', 'suffix': 'au'},
+  ];
+
+  // This list will hold all 468 generated combined forms
+  late List<Map<String, String>> combinedForms;
+
+  final Set<int> completed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    flutterTts.setLanguage("ml-IN");
+    combinedForms = generateCombinedForms();
+  }
+
+  // Builds all combinations: 36 consonants x 13 vowel signs = 468 forms
+  List<Map<String, String>> generateCombinedForms() {
+    List<Map<String, String>> result = [];
+
+    for (String consonant in baseConsonants) {
+      for (var vowel in vowelSigns) {
+        String combinedLetter =
+            consonant + vowel['sign']!; // joins consonant + vowel sign
+        String pronunciation =
+            consonant + vowel['suffix']!; // e.g. "ka" + "aa" style text
+
+        result.add({'letter': combinedLetter, 'sound': pronunciation});
+      }
+    }
+
+    return result;
+  }
+
+  @override
+  void dispose() {
+    flutterTts.stop();
+    super.dispose();
+  }
+
+  void speakAndMark(int index) async {
+    final letter = combinedForms[index]['letter']!;
+    await flutterTts.speak(letter);
+
+    setState(() {
+      completed.add(index);
+
+      if (completed.length == combinedForms.length) {
+        ProgressData.instance.combinedFormsDone = true;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool allDone = completed.length == combinedForms.length;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Combined Forms')),
+      body: Column(
+        children: [
+          if (allDone)
+            Container(
+              width: double.infinity,
+              color: Colors.green[100],
+              padding: const EdgeInsets.all(12),
+              child: const Text(
+                '🎉 Module Complete! Words unlocked.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          // Shows progress count, since 468 is a lot to track visually
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Text(
+              'Completed: ${completed.length} / ${combinedForms.length}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5, // smaller boxes since there are SO many
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: combinedForms.length,
+              itemBuilder: (context, index) {
+                final bool done = completed.contains(index);
+
+                return GestureDetector(
+                  onTap: () => speakAndMark(index),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: done ? Colors.green[50] : Colors.purple[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: done ? Colors.green : Colors.grey[300]!,
+                        width: done ? 2 : 1,
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                combinedForms[index]['letter']!,
+                                style: const TextStyle(fontSize: 18),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                combinedForms[index]['sound']!,
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (done)
+                          const Positioned(
+                            top: 2,
+                            right: 2,
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                              size: 12,
                             ),
                           ),
                       ],
