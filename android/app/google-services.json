@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "65865114045",
+    "project_id": "malayalam-learning-app-3a42d",
+    "storage_bucket": "malayalam-learning-app-3a42d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:65865114045:android:37b992d3077a0e2cb872d4",
+        "android_client_info": {
+          "package_name": "com.example.campus_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCfTwHCbHklU9GSxRiP5drARpAjagnbvQ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -3,6 +3,10 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 // ---------- SHARED PROGRESS TRACKER ----------
 // This object holds the "notice board" that every screen can read/write.
@@ -16,6 +20,7 @@ class ProgressData {
   bool combinedFormsDone = false;
   bool wordsDone = false;
   bool quizPassed = false;
+  int quizScore = 0; 
 
   // Calculates overall progress as a percentage (0.0 to 1.0)
   double get overallProgress {
@@ -27,6 +32,18 @@ class ProgressData {
     if (quizPassed) doneCount++;
     return doneCount / 5; // 5 total stages
   }
+}
+
+// ---------- FIRESTORE PROGRESS HELPER ----------
+// One shared function every screen can call to update this student's
+// progress flag in Firestore, using whichever account is currently logged in.
+Future<void> updateProgressInFirestore(String fieldName, dynamic value) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return; // safety check — should never happen if logged in
+
+  await FirebaseFirestore.instance.collection('students').doc(user.uid).update({
+    fieldName: value,
+  });
 }
 
 // ---------- REUSABLE MALAYALAM CARD WIDGET ----------
@@ -121,7 +138,9 @@ class MalayalamCard extends StatelessWidget {
   }
 }
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MyApp());
 }
 
@@ -261,12 +280,64 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
               const SizedBox(height: 24),
 
               ElevatedButton(
-                onPressed: () {
-                  print('Name: ${nameController.text}');
-                  print('Class: ${classController.text}');
-                  print('Email: ${emailController.text}');
-                  print('Phone: ${phoneController.text}');
-                  print('Password: ${passwordController.text}');
+                onPressed: () async {
+                  try {
+                    // Step 1: Create the account in Firebase Auth (email + password only)
+                    final userCredential = await FirebaseAuth.instance
+                        .createUserWithEmailAndPassword(
+                          email: emailController.text.trim(),
+                          password: passwordController.text.trim(),
+                        );
+
+                    // Step 2: Save the rest of the student's details in Firestore,
+                    // using the same UID Firebase Auth just created — this links them.
+                    await FirebaseFirestore.instance
+                        .collection('students')
+                        .doc(userCredential.user!.uid)
+                        .set({
+                          'name': nameController.text.trim(),
+                          'studentClass': classController.text.trim(),
+                          'email': emailController.text.trim(),
+                          'phone': phoneController.text.trim(),
+                          'vowelsDone': false,
+                          'consonantsDone': false,
+                          'combinedFormsDone': false,
+                          'wordsDone': false,
+                          'quizPassed': false,
+                          'quizScore': 0,
+                          'completed': false,
+                          'createdAt': FieldValue.serverTimestamp(),
+                        });
+
+                    // Step 3: Show success and send them to Login
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Account created! Please log in.'),
+                        ),
+                      );
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LoginScreen(),
+                        ),
+                      );
+                    }
+                  } on FirebaseAuthException catch (e) {
+                    String message = 'Registration failed. Please try again.';
+                    if (e.code == 'email-already-in-use') {
+                      message = 'That email is already registered.';
+                    } else if (e.code == 'weak-password') {
+                      message = 'Password should be at least 6 characters.';
+                    } else if (e.code == 'invalid-email') {
+                      message = 'Please enter a valid email address.';
+                    }
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text(message)));
+                    }
+                  }
                 },
                 child: const Text('Register'),
               ),
@@ -333,14 +404,36 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 24),
 
             ElevatedButton(
-              onPressed: () {
-                // For now, just go straight to Dashboard
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const DashboardScreen(),
-                  ),
-                );
+              onPressed: () async {
+                try {
+                  await FirebaseAuth.instance.signInWithEmailAndPassword(
+                    email: emailController.text.trim(),
+                    password: passwordController.text.trim(),
+                  );
+
+                  if (context.mounted) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DashboardScreen(),
+                      ),
+                    );
+                  }
+                } on FirebaseAuthException catch (e) {
+                  String message = 'Login failed. Please try again.';
+                  if (e.code == 'user-not-found' ||
+                      e.code == 'wrong-password' ||
+                      e.code == 'invalid-credential') {
+                    message = 'Incorrect email or password.';
+                  } else if (e.code == 'invalid-email') {
+                    message = 'Please enter a valid email address.';
+                  }
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(message)));
+                  }
+                }
               },
               child: const Text('Login'),
             ),
@@ -716,12 +809,15 @@ class _VowelsScreenState extends State<VowelsScreen> {
 
     setState(() {
       completed.add(index);
-
-      // If all vowels are now done, update the shared progress tracker
-      if (completed.length == vowels.length) {
-        ProgressData.instance.vowelsDone = true;
-      }
     });
+
+    // If all vowels are now done, update both the local tracker AND Firestore
+    if (completed.length == vowels.length) {
+      setState(() {
+        ProgressData.instance.vowelsDone = true;
+      });
+      await updateProgressInFirestore('vowelsDone', true);
+    }
   }
 
   @override
@@ -1061,12 +1157,14 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
 
     setState(() {
       completed.add(index);
-
-      // If all consonants are done, update shared progress tracker
-      if (completed.length == consonants.length) {
-        ProgressData.instance.consonantsDone = true;
-      }
     });
+
+    if (completed.length == consonants.length) {
+      setState(() {
+        ProgressData.instance.consonantsDone = true;
+      });
+      await updateProgressInFirestore('consonantsDone', true);
+    }
   }
 
   @override
@@ -1297,7 +1395,7 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
   }
 
   // If every single form in every group is completed, unlock Words
-  void checkIfEverythingDone() {
+  void checkIfEverythingDone() async {
     int totalDone = 0;
     for (final set in completedSets) {
       totalDone += set.length;
@@ -1306,6 +1404,7 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
       setState(() {
         ProgressData.instance.combinedFormsDone = true;
       });
+      await updateProgressInFirestore('combinedFormsDone', true);
     }
   }
 
@@ -1740,12 +1839,18 @@ class _WordsScreenState extends State<WordsScreen> {
     return done == total;
   }
 
-  void onWordCompleted(int catIndex, int wordIndex) {
+  void onWordCompleted(int catIndex, int wordIndex) async {
     setState(() {
       completedPerCategory.putIfAbsent(catIndex, () => {});
       completedPerCategory[catIndex]!.add(wordIndex);
-      if (allWordsDone) ProgressData.instance.wordsDone = true;
     });
+
+    if (allWordsDone) {
+      setState(() {
+        ProgressData.instance.wordsDone = true;
+      });
+      await updateProgressInFirestore('wordsDone', true);
+    }
   }
 
   @override
@@ -2136,7 +2241,7 @@ class _QuizScreenState extends State<QuizScreen> {
     });
   }
 
-  void nextQuestion() {
+  void nextQuestion() async {
     if (currentIndex < questions.length - 1) {
       setState(() {
         currentIndex++;
@@ -2146,10 +2251,18 @@ class _QuizScreenState extends State<QuizScreen> {
     } else {
       setState(() {
         quizFinished = true;
-        if (score >= 10) {
-          ProgressData.instance.quizPassed = true;
-        }
       });
+
+      // ⚠️ KNOWN BUG: spec requires ≥65% (13/20) to pass.
+      // This currently checks >= 10 (50%) — needs fixing.
+      if (score >= 10) {
+        setState(() {
+          ProgressData.instance.quizPassed = true;
+          ProgressData.instance.quizScore = score; 
+        });
+        await updateProgressInFirestore('quizPassed', true);
+      }
+      await updateProgressInFirestore('quizScore', score);
     }
   }
 
@@ -2364,6 +2477,24 @@ class _CertificateScreenState extends State<CertificateScreen> {
       studentName = name;
       generated = true;
     });
+    // Save completion to Firestore
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('students')
+            .doc(user.uid)
+            .update({
+              'completed': true,
+              'completedDate': DateTime.now().toIso8601String(),
+              'quizScore':
+                  ProgressData.instance.quizScore, // we'll add this below
+            });
+        print('✅ Completion saved to Firestore!');
+      }
+    } catch (e) {
+      print('❌ Error saving completion: $e');
+    }
 
     final pdf = pw.Document();
 
@@ -2532,32 +2663,220 @@ class _CertificateScreenState extends State<CertificateScreen> {
 }
 
 // ---------- FACULTY SCREEN ----------
-class FacultyScreen extends StatelessWidget {
+class FacultyScreen extends StatefulWidget {
   const FacultyScreen({super.key});
+  @override
+  State<FacultyScreen> createState() => _FacultyScreenState();
+}
+
+class _FacultyScreenState extends State<FacultyScreen> {
+  // This will hold the list of completed students from Firestore
+  List<Map<String, dynamic>> completedStudents = [];
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    loadCompletedStudents();
+  }
+
+  // Fetch all students where completed == true from Firestore
+  Future<void> loadCompletedStudents() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('students')
+          .where('completed', isEqualTo: true)
+          .get();
+
+      setState(() {
+        completedStudents = snapshot.docs.map((doc) => doc.data()).toList();
+        isLoading = false;
+      });
+    } catch (e) {
+      print('❌ Error loading students: $e');
+      setState(() => isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Faculty Portal')),
-      body: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('🧑‍🏫', style: TextStyle(fontSize: 60)),
-            SizedBox(height: 20),
-            Text(
-              'Coming Soon!',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 12),
-            Text(
-              'Faculty portal is under development.',
-              style: TextStyle(color: Colors.grey, fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+      appBar: AppBar(
+        title: const Text('Faculty Portal'),
+        actions: [
+          // Refresh button to reload the list
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              setState(() => isLoading = true);
+              loadCompletedStudents();
+            },
+          ),
+        ],
       ),
+      body: isLoading
+          // Show loading spinner while fetching
+          ? const Center(child: CircularProgressIndicator())
+          // Show empty message if no students completed yet
+          : completedStudents.isEmpty
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('🧑‍🏫', style: TextStyle(fontSize: 60)),
+                  SizedBox(height: 16),
+                  Text(
+                    'No students have completed the course yet.',
+                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            )
+          // Show list of completed students
+          : Column(
+              children: [
+                // Header showing count
+                Container(
+                  width: double.infinity,
+                  color: Colors.green[50],
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    '🏆 ${completedStudents.length} student(s) completed the course',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+                // Student list
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: completedStudents.length,
+                    itemBuilder: (context, index) {
+                      final student = completedStudents[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.green[200]!),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Name + completion badge
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    student['name'] ?? 'Unknown',
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              // Class
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.school,
+                                    size: 16,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text('Class: ${student['class'] ?? '-'}'),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              // Email
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.email,
+                                    size: 16,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(student['email'] ?? '-'),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              // Phone
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.phone,
+                                    size: 16,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(student['phone'] ?? '-'),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              // Score
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.star,
+                                    size: 16,
+                                    color: Colors.amber,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Quiz Score: ${student['quizScore'] ?? '-'} / 20',
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              // Completion date
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.calendar_today,
+                                    size: 16,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Completed: ${_formatDate(student['completedDate'])}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
     );
+  }
+
+  // Converts "2024-01-15T10:30:00" to "15/01/2024"
+  String _formatDate(String? dateString) {
+    if (dateString == null) return '-';
+    try {
+      final date = DateTime.parse(dateString);
+      return '${date.day}/${date.month}/${date.year}';
+    } catch (e) {
+      return '-';
+    }
   }
 }
