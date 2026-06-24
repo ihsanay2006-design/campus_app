@@ -20,7 +20,7 @@ class ProgressData {
   bool combinedFormsDone = false;
   bool wordsDone = false;
   bool quizPassed = false;
-  int quizScore = 0; 
+  int quizScore = 0;
 
   // Calculates overall progress as a percentage (0.0 to 1.0)
   double get overallProgress {
@@ -373,6 +373,77 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
 
+  // ---- Forgot Password function ----
+  void _showForgotPasswordDialog(BuildContext context) {
+    final TextEditingController resetEmailController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset Password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter your registered email. We will send you a password reset link.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: resetEmailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email ID',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.email),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = resetEmailController.text.trim();
+              if (email.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter your email')),
+                );
+                return;
+              }
+              try {
+                await FirebaseAuth.instance.sendPasswordResetEmail(
+                  email: email,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      '✅ Password reset email sent! Check your inbox.',
+                    ),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 4),
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ Error: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text('Send Reset Link'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -410,7 +481,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     email: emailController.text.trim(),
                     password: passwordController.text.trim(),
                   );
-
                   if (context.mounted) {
                     Navigator.push(
                       context,
@@ -435,7 +505,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   }
                 }
               },
-              child: const Text('Login'),
+              child: const Text('Login 🚀'),
+            ),
+
+            // ---- Forgot Password link ----
+            TextButton(
+              onPressed: () => _showForgotPasswordDialog(context),
+              child: const Text('Forgot Password?'),
             ),
           ],
         ),
@@ -2258,7 +2334,7 @@ class _QuizScreenState extends State<QuizScreen> {
       if (score >= 10) {
         setState(() {
           ProgressData.instance.quizPassed = true;
-          ProgressData.instance.quizScore = score; 
+          ProgressData.instance.quizScore = score;
         });
         await updateProgressInFirestore('quizPassed', true);
       }
