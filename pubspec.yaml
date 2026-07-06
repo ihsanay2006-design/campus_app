@@ -26,3 +26,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/crest_banner.png
+    - assets/images/river_banner.png
+    - assets/images/home_top_banner.png
+    - assets/images/home_bottom_banner.png
+    - assets/images/faculty_avatar.png
+    - assets/images/certificate_template.jpg
