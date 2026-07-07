@@ -1,3 +1,4 @@
+import 'profile_screen.dart';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -645,6 +646,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final TextEditingController registerNumberController =
+      TextEditingController();
   bool obscurePassword = true;
 
   @override
@@ -680,6 +683,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                             label: 'FULL NAME',
                             hint: 'Enter your full name',
                             controller: nameController,
+                          ),
+                          const SizedBox(height: 14),
+                          _LabeledField(
+                            icon: Icons.badge,
+                            label: 'REGISTER NUMBER',
+                            hint: 'e.g. 22BCA001',
+                            controller: registerNumberController,
                           ),
                           const SizedBox(height: 14),
                           _LabeledField(
@@ -734,21 +744,57 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () async {
+                          // ---- Validate Register Number is not empty ----
+                          final regNum = registerNumberController.text.trim();
+                          if (regNum.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please enter your Register Number.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+
+                          // ---- Check for duplicate Register Number in Firestore ----
                           try {
-                            // Step 1: Create the account in Firebase Auth (email + password only)
+                            final existing = await FirebaseFirestore.instance
+                                .collection('students')
+                                .where('registerNumber', isEqualTo: regNum)
+                                .get();
+
+                            if (existing.docs.isNotEmpty) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'This Register Number is already registered.',
+                                    ),
+                                  ),
+                                );
+                              }
+                              return;
+                            }
+                          } catch (e) {
+                            // If the duplicate check itself fails, we still continue safely
+                          }
+
+                          try {
+                            // Step 1: Create the account in Firebase Auth
                             final userCredential = await FirebaseAuth.instance
                                 .createUserWithEmailAndPassword(
                                   email: emailController.text.trim(),
                                   password: passwordController.text.trim(),
                                 );
 
-                            // Step 2: Save the rest of the student's details in Firestore,
-                            // using the same UID Firebase Auth just created — this links them.
+                            // Step 2: Save all details including Register Number in Firestore
                             await FirebaseFirestore.instance
                                 .collection('students')
                                 .doc(userCredential.user!.uid)
                                 .set({
                                   'name': nameController.text.trim(),
+                                  'registerNumber': regNum,
                                   'studentClass': classController.text.trim(),
                                   'email': emailController.text.trim(),
                                   'phone': phoneController.text.trim(),
@@ -762,7 +808,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                                   'createdAt': FieldValue.serverTimestamp(),
                                 });
 
-                            // Step 3: Show success and send them to Login
+                            // Step 3: Show success and go to Login
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -1106,6 +1152,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                   ),
+                  // ---- PASTE THIS NEW BLOCK HERE ----
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ProfileScreen(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardCream,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: AppColors.softBorder),
+                      ),
+                      child: const Icon(
+                        Icons.person,
+                        size: 18,
+                        color: AppColors.darkGreen,
+                      ),
+                    ),
+                  ),
+                  // ---- END NEW BLOCK — Logout GestureDetector stays right after, unchanged ----
                   GestureDetector(
                     onTap: () {
                       Navigator.popUntil(context, (route) => route.isFirst);
