@@ -167,11 +167,38 @@ class MalayalamCard extends StatelessWidget {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp());
+
+  // Check if a user is already logged in
+  final user = FirebaseAuth.instance.currentUser;
+
+  // If yes, load their progress from Firestore before showing the app
+  if (user != null) {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('students')
+          .doc(user.uid)
+          .get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        ProgressData.instance.vowelsDone = data['vowelsDone'] ?? false;
+        ProgressData.instance.consonantsDone = data['consonantsDone'] ?? false;
+        ProgressData.instance.combinedFormsDone =
+            data['combinedFormsDone'] ?? false;
+        ProgressData.instance.wordsDone = data['wordsDone'] ?? false;
+        ProgressData.instance.quizPassed = data['quizPassed'] ?? false;
+        ProgressData.instance.quizScore = data['quizScore'] ?? 0;
+      }
+    } catch (e) {
+      // If loading fails, just continue — progress will show as 0
+    }
+  }
+
+  runApp(MyApp(isLoggedIn: user != null));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final bool isLoggedIn;
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
@@ -198,7 +225,8 @@ class MyApp extends StatelessWidget {
           style: TextButton.styleFrom(foregroundColor: AppColors.darkGreen),
         ),
       ),
-      home: const HomeScreen(),
+      // If already logged in → go to Dashboard, otherwise → Home Screen
+      home: isLoggedIn ? const DashboardScreen() : const HomeScreen(),
     );
   }
 }
@@ -1179,8 +1207,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   // ---- END NEW BLOCK — Logout GestureDetector stays right after, unchanged ----
                   GestureDetector(
-                    onTap: () {
-                      Navigator.popUntil(context, (route) => route.isFirst);
+                    onTap: () async {
+                      // Sign out from Firebase so persistent login is cleared
+                      await FirebaseAuth.instance.signOut();
+                      // Reset all local progress
+                      ProgressData.instance.vowelsDone = false;
+                      ProgressData.instance.consonantsDone = false;
+                      ProgressData.instance.combinedFormsDone = false;
+                      ProgressData.instance.wordsDone = false;
+                      ProgressData.instance.quizPassed = false;
+                      ProgressData.instance.quizScore = 0;
+                      // Go back to Home Screen
+                      if (context.mounted) {
+                        Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const HomeScreen(),
+                          ),
+                          (route) => false,
+                        );
+                      }
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
