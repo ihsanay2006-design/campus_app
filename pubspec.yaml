@@ -1,4 +1,14 @@
-name: campus_app
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  adaptive_icon_background: "#FBF7E6" # AppColors.cream — matches your app theme
+  adaptive_icon_foreground: "assets/icons/app_icon_foreground.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  background_color_ios: "#FBF7E6"
+
+name: malayalam_bloom
 description: "A new Flutter project."
 publish_to: "none"
 
@@ -22,6 +32,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.3
   flutter_lints: ^6.0.0
 
 flutter:
@@ -33,3 +44,5 @@ flutter:
     - assets/images/home_bottom_banner.png
     - assets/images/faculty_avatar.png
     - assets/images/certificate_template.jpg
+    - assets/icons/app_icon.png
+    - assets/icons/app_icon_foreground.png

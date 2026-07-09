@@ -10,6 +10,7 @@ import 'firebase_options.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'certificate/certificate_service.dart';
+import 'package:flutter/services.dart'; // NEW — needed for SystemNavigator.pop()
 
 // ---------- APP COLORS (Kerala Theme — matched exactly from design) ----------
 class AppColors {
@@ -34,6 +35,7 @@ class ProgressData {
   bool wordsDone = false;
   bool quizPassed = false;
   int quizScore = 0;
+  bool certificateCompleted = false;
 
   // Calculates overall progress as a percentage (0.0 to 1.0)
   double get overallProgress {
@@ -68,7 +70,12 @@ class MalayalamCard extends StatelessWidget {
   final String emoji;
   final bool isCompleted;
   final bool isPlaying;
+  final bool isLocked;
   final VoidCallback onTap;
+
+  // NEW: example word pronunciation support
+  final VoidCallback? onExampleTap;
+  final bool isExamplePlaying;
 
   const MalayalamCard({
     super.key,
@@ -80,19 +87,26 @@ class MalayalamCard extends StatelessWidget {
     required this.isCompleted,
     required this.onTap,
     this.isPlaying = false,
+    this.isLocked = false,
+    this.onExampleTap,
+    this.isExamplePlaying = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: isLocked ? null : onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
-          color: AppColors.cardCream,
+          color: isLocked ? Colors.grey[100] : AppColors.cardCream,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isPlaying ? AppColors.gold : AppColors.softBorder,
+            color: isLocked
+                ? Colors.grey[300]!
+                : isPlaying
+                ? AppColors.gold
+                : AppColors.softBorder,
             width: isPlaying ? 2.5 : 1,
           ),
           boxShadow: [
@@ -110,13 +124,15 @@ class MalayalamCard extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisSize:
+                    MainAxisSize.min, // NEW — column only takes needed height
                 children: [
                   Text(
-                    malayalamText,
-                    style: const TextStyle(
+                    isLocked ? '🔒' : malayalamText,
+                    style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.darkGreen,
+                      color: isLocked ? Colors.grey[400] : AppColors.darkGreen,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -130,19 +146,61 @@ class MalayalamCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(emoji, style: const TextStyle(fontSize: 16)),
-                  Text(
-                    example,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.darkGreen,
+
+                  // ---- EXAMPLE WORD (now independently tappable) ----
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: (isLocked || onExampleTap == null)
+                        ? null
+                        : onExampleTap,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: isExamplePlaying
+                          ? BoxDecoration(
+                              color: AppColors.gold.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            )
+                          : null,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!isLocked)
+                            Icon(
+                              Icons.volume_up,
+                              size: 10,
+                              color: isExamplePlaying
+                                  ? AppColors.gold
+                                  : AppColors.green.withOpacity(0.6),
+                            ),
+                          if (!isLocked) const SizedBox(width: 2),
+                          Text(
+                            example,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: isExamplePlaying
+                                  ? AppColors.gold
+                                  : AppColors.darkGreen,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 1, // NEW
+                            overflow: TextOverflow
+                                .ellipsis, // NEW — no more spilling outside the card
+                          ),
+                        ],
+                      ),
                     ),
-                    textAlign: TextAlign.center,
                   ),
+
                   Text(
                     meaning,
                     style: TextStyle(fontSize: 10, color: Colors.brown[400]),
                     textAlign: TextAlign.center,
+                    maxLines: 1, // NEW
+                    overflow: TextOverflow.ellipsis, // NEW
                   ),
                 ],
               ),
@@ -187,9 +245,12 @@ void main() async {
         ProgressData.instance.wordsDone = data['wordsDone'] ?? false;
         ProgressData.instance.quizPassed = data['quizPassed'] ?? false;
         ProgressData.instance.quizScore = data['quizScore'] ?? 0;
+        ProgressData.instance.certificateCompleted = data['completed'] ?? false;
       }
     } catch (e) {
-      // If loading fails, just continue — progress will show as 0
+      // Log for diagnostics — a failed fetch here would otherwise look
+      // exactly like silent progress loss to the user
+      debugPrint('⚠️ Failed to restore progress from Firestore: $e');
     }
   }
 
@@ -314,7 +375,8 @@ class HomeScreen extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const FacultyScreen(),
+                            builder: (context) =>
+                                const FacultyRegistrationScreen(),
                           ),
                         );
                       },
@@ -835,6 +897,15 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                                   'completed': false,
                                   'createdAt': FieldValue.serverTimestamp(),
                                 });
+                            // NEW: role lookup doc — Security Rules check this
+                            // to decide what the user is allowed to read/write
+                            await FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(userCredential.user!.uid)
+                                .set({
+                                  'role': 'student',
+                                  'className': classController.text.trim(),
+                                });
 
                             // Step 3: Show success and go to Login
                             if (context.mounted) {
@@ -1114,6 +1185,665 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
+// ---------- FACULTY AUTH TABS ----------
+class _FacultyAuthTabs extends StatelessWidget {
+  final bool isRegistrationActive;
+  const _FacultyAuthTabs({required this.isRegistrationActive});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: GestureDetector(
+            onTap: () {
+              if (!isRegistrationActive) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const FacultyRegistrationScreen(),
+                  ),
+                );
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: isRegistrationActive
+                    ? AppColors.green
+                    : AppColors.cardCream,
+                borderRadius: const BorderRadius.horizontal(
+                  left: Radius.circular(12),
+                ),
+                border: Border.all(color: AppColors.softBorder),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.person,
+                    size: 16,
+                    color: isRegistrationActive
+                        ? AppColors.cardCream
+                        : AppColors.darkGreen,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'New Registration',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: isRegistrationActive
+                          ? AppColors.cardCream
+                          : AppColors.darkGreen,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: GestureDetector(
+            onTap: () {
+              if (isRegistrationActive) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const FacultyLoginScreen(),
+                  ),
+                );
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: !isRegistrationActive
+                    ? AppColors.green
+                    : AppColors.cardCream,
+                borderRadius: const BorderRadius.horizontal(
+                  right: Radius.circular(12),
+                ),
+                border: Border.all(color: AppColors.softBorder),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.login,
+                    size: 16,
+                    color: !isRegistrationActive
+                        ? AppColors.cardCream
+                        : AppColors.darkGreen,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Login',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: !isRegistrationActive
+                          ? AppColors.cardCream
+                          : AppColors.darkGreen,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------- FACULTY REGISTRATION ----------
+class FacultyRegistrationScreen extends StatefulWidget {
+  const FacultyRegistrationScreen({super.key});
+  @override
+  State<FacultyRegistrationScreen> createState() =>
+      _FacultyRegistrationScreenState();
+}
+
+class _FacultyRegistrationScreenState extends State<FacultyRegistrationScreen> {
+  final nameController = TextEditingController();
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+  bool obscurePassword = true;
+  bool isLoading = false;
+
+  Future<void> _register() async {
+    if (nameController.text.trim().isEmpty ||
+        emailController.text.trim().isEmpty ||
+        passwordController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields.')),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
+    try {
+      final credential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+            email: emailController.text.trim(),
+            password: passwordController.text.trim(),
+          );
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(credential.user!.uid)
+          .set({
+            'role': 'faculty',
+            'name': nameController.text.trim(),
+            'email': emailController.text.trim(),
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Faculty account created! Please log in.'),
+          ),
+        );
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const FacultyLoginScreen()),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      String message = 'Registration failed. Please try again.';
+      if (e.code == 'email-already-in-use') {
+        message = 'That email is already registered.';
+      } else if (e.code == 'weak-password') {
+        message = 'Password should be at least 6 characters.';
+      } else if (e.code == 'invalid-email') {
+        message = 'Please enter a valid email address.';
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.cream,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const _AuthHeader(tagline: 'Faculty Portal'),
+              const SizedBox(height: 18),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    const _FacultyAuthTabs(isRegistrationActive: true),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardCream,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.softBorder),
+                      ),
+                      child: Column(
+                        children: [
+                          _LabeledField(
+                            icon: Icons.person,
+                            label: 'FULL NAME',
+                            hint: 'Enter your full name',
+                            controller: nameController,
+                          ),
+                          const SizedBox(height: 14),
+                          _LabeledField(
+                            icon: Icons.email,
+                            label: 'EMAIL ID',
+                            hint: 'your@email.com',
+                            controller: emailController,
+                            keyboardType: TextInputType.emailAddress,
+                          ),
+                          const SizedBox(height: 14),
+                          _LabeledField(
+                            icon: Icons.lock,
+                            label: 'PASSWORD',
+                            hint: 'Create a password',
+                            controller: passwordController,
+                            obscureText: obscurePassword,
+                            trailing: IconButton(
+                              icon: Icon(
+                                obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                color: AppColors.darkGreen,
+                                size: 18,
+                              ),
+                              onPressed: () => setState(
+                                () => obscurePassword = !obscurePassword,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : _register,
+                        child: isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('🌿  Register as Faculty  🌿'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('←  Back to role selection  →'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Image.asset(
+                'assets/images/river_banner.png',
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- FACULTY LOGIN SCREEN ----------
+class FacultyLoginScreen extends StatefulWidget {
+  const FacultyLoginScreen({super.key});
+
+  @override
+  State<FacultyLoginScreen> createState() => _FacultyLoginScreenState();
+}
+
+class _FacultyLoginScreenState extends State<FacultyLoginScreen> {
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+  bool obscurePassword = true;
+  bool isLoading = false;
+
+  void _showForgotPasswordDialog(BuildContext context) {
+    final TextEditingController resetEmailController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.cardCream,
+        title: const Text(
+          'Reset Password',
+          style: TextStyle(color: AppColors.darkGreen),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Enter your registered faculty email. We will send you a password reset link.',
+              style: TextStyle(fontSize: 13, color: Colors.brown[400]),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: resetEmailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: InputDecoration(
+                labelText: 'Email ID',
+                labelStyle: const TextStyle(color: AppColors.darkGreen),
+                prefixIcon: const Icon(Icons.email, color: AppColors.green),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: const BorderSide(color: AppColors.softBorder),
+                ),
+                border: OutlineInputBorder(
+                  borderSide: const BorderSide(color: AppColors.softBorder),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = resetEmailController.text.trim();
+              if (email.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter your email')),
+                );
+                return;
+              }
+              try {
+                await FirebaseAuth.instance.sendPasswordResetEmail(
+                  email: email,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      '✅ Password reset email sent! Check your inbox.',
+                    ),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 4),
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ Error: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text('Send Reset Link'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _login() async {
+    setState(() => isLoading = true);
+    try {
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: emailController.text.trim(),
+        password: passwordController.text.trim(),
+      );
+
+      // Verify this account is actually registered as faculty —
+      // prevents a student account from slipping into the faculty portal
+      // even if they somehow know a valid email/password combo.
+      final roleDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(credential.user!.uid)
+          .get();
+
+      final role = roleDoc.data()?['role'];
+
+      if (role != 'faculty') {
+        await FirebaseAuth.instance.signOut();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('This account is not registered as faculty.'),
+            ),
+          );
+        }
+        setState(() => isLoading = false);
+        return;
+      }
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const ClassAccessScreen()),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      String message = 'Login failed. Please try again.';
+      if (e.code == 'user-not-found' ||
+          e.code == 'wrong-password' ||
+          e.code == 'invalid-credential') {
+        message = 'Incorrect email or password.';
+      } else if (e.code == 'invalid-email') {
+        message = 'Please enter a valid email address.';
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
+      setState(() => isLoading = false);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Something went wrong. Please try again.'),
+          ),
+        );
+      }
+      setState(() => isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.cream,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const _AuthHeader(tagline: 'Faculty Portal'),
+              const SizedBox(height: 18),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    const _FacultyAuthTabs(isRegistrationActive: false),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardCream,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.softBorder),
+                      ),
+                      child: Column(
+                        children: [
+                          _LabeledField(
+                            icon: Icons.email,
+                            label: 'EMAIL ID',
+                            hint: 'faculty@email.com',
+                            controller: emailController,
+                            keyboardType: TextInputType.emailAddress,
+                          ),
+                          const SizedBox(height: 14),
+                          _LabeledField(
+                            icon: Icons.lock,
+                            label: 'PASSWORD',
+                            hint: 'Enter your password',
+                            controller: passwordController,
+                            obscureText: obscurePassword,
+                            trailing: IconButton(
+                              icon: Icon(
+                                obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                color: AppColors.darkGreen,
+                                size: 18,
+                              ),
+                              onPressed: () => setState(
+                                () => obscurePassword = !obscurePassword,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : _login,
+                        child: isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('🌿  Faculty Login  🌿'),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    TextButton(
+                      onPressed: () => _showForgotPasswordDialog(context),
+                      child: const Text('Forgot Password?'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('←  Back to role selection  →'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Image.asset(
+                'assets/images/river_banner.png',
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- CLASS ACCESS SCREEN ----------
+// Shown right after faculty login. Faculty types the class name they
+// want to view — no password gate, just a direct filter.
+class ClassAccessScreen extends StatefulWidget {
+  const ClassAccessScreen({super.key});
+  @override
+  State<ClassAccessScreen> createState() => _ClassAccessScreenState();
+}
+
+class _ClassAccessScreenState extends State<ClassAccessScreen> {
+  final classNameController = TextEditingController();
+  String? errorText;
+
+  void _proceed() {
+    final className = classNameController.text.trim();
+
+    if (className.isEmpty) {
+      setState(() => errorText = 'Please enter a class name.');
+      return;
+    }
+
+    setState(() => errorText = null);
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FacultyScreen(className: className),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.cream,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const _AuthHeader(tagline: 'Select Class to View'),
+              const SizedBox(height: 18),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardCream,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.softBorder),
+                      ),
+                      child: Column(
+                        children: [
+                          _LabeledField(
+                            icon: Icons.school,
+                            label: 'CLASS NAME',
+                            hint: 'e.g. I BSC CS',
+                            controller: classNameController,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        errorText!,
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 13,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _proceed,
+                        child: const Text('🔓  View Class Students'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () async {
+                        await FirebaseAuth.instance.signOut();
+                        if (context.mounted) {
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const HomeScreen(),
+                            ),
+                            (route) => false,
+                          );
+                        }
+                      },
+                      child: const Text('Logout'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Image.asset(
+                'assets/images/river_banner.png',
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------- DASHBOARD SCREEN ----------
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -1158,326 +1888,364 @@ class _DashboardScreenState extends State<DashboardScreen> {
       },
     ];
 
-    return Scaffold(
-      backgroundColor: AppColors.cream,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // ---- Custom Header: coconut tree + title (left), logout (right) ----
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
-                children: [
-                  const Text('🌴', style: TextStyle(fontSize: 26)),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Malayalam Learning App',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.darkGreen,
-                      ),
-                    ),
-                  ),
-                  // ---- PASTE THIS NEW BLOCK HERE ----
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ProfileScreen(),
+    return PopScope(
+      canPop: false, // we handle back button manually below
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return; // already handled by system, nothing to do
+
+        // Show "Exit app?" confirmation — NEVER logs out, NEVER clears session
+        final bool? shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: AppColors.cardCream,
+            title: const Text(
+              'Exit App?',
+              style: TextStyle(color: AppColors.darkGreen),
+            ),
+            content: Text(
+              'You will remain logged in. Do you want to exit the app?',
+              style: TextStyle(color: Colors.brown[400]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Exit'),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldExit == true) {
+          // Closes the app WITHOUT touching FirebaseAuth session or ProgressData
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.cream,
+        body: SafeArea(
+          child: Column(
+            children: [
+              // ---- Custom Header: coconut tree + title (left), logout (right) ----
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    const Text('🌴', style: TextStyle(fontSize: 26)),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Malayalam Learning App',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.darkGreen,
                         ),
-                      );
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.cardCream,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppColors.softBorder),
-                      ),
-                      child: const Icon(
-                        Icons.person,
-                        size: 18,
-                        color: AppColors.darkGreen,
                       ),
                     ),
-                  ),
-                  // ---- END NEW BLOCK — Logout GestureDetector stays right after, unchanged ----
-                  GestureDetector(
-                    onTap: () async {
-                      // Sign out from Firebase so persistent login is cleared
-                      await FirebaseAuth.instance.signOut();
-                      // Reset all local progress
-                      ProgressData.instance.vowelsDone = false;
-                      ProgressData.instance.consonantsDone = false;
-                      ProgressData.instance.combinedFormsDone = false;
-                      ProgressData.instance.wordsDone = false;
-                      ProgressData.instance.quizPassed = false;
-                      ProgressData.instance.quizScore = 0;
-                      // Go back to Home Screen
-                      if (context.mounted) {
-                        Navigator.pushAndRemoveUntil(
+                    // ---- PASTE THIS NEW BLOCK HERE ----
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const HomeScreen(),
-                          ),
-                          (route) => false,
-                        );
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.cardCream,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppColors.softBorder),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(
-                            Icons.logout,
-                            size: 16,
-                            color: AppColors.darkGreen,
-                          ),
-                          SizedBox(width: 4),
-                          Text(
-                            'Logout',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.darkGreen,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 8),
-
-                    // ---- Overall Progress Card ----
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.cardCream,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.softBorder),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Overall Progress',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.darkGreen,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              minHeight: 12,
-                              backgroundColor: AppColors.softBorder,
-                              color: AppColors.green,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '${(progress * 100).toStringAsFixed(0)}% complete',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.brown[400],
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    const Text(
-                      'Modules',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.darkGreen,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // ---- Modules Grid ----
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 14,
-                            mainAxisSpacing: 14,
-                            childAspectRatio: 1.05,
-                          ),
-                      itemCount: modules.length,
-                      itemBuilder: (context, index) {
-                        final module = modules[index];
-                        final bool locked = module['locked'];
-
-                        return GestureDetector(
-                          onTap: () {
-                            if (locked) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Complete previous module first!',
-                                  ),
-                                ),
-                              );
-                            } else if (module['title'] == 'Vowels') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const VowelsScreen(),
-                                ),
-                              ).then((_) => setState(() {}));
-                            } else if (module['title'] == 'Consonants') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const ConsonantsScreen(),
-                                ),
-                              ).then((_) => setState(() {}));
-                            } else if (module['title'] == 'Combined Forms') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const CombinedFormsScreen(),
-                                ),
-                              ).then((_) => setState(() {}));
-                            } else if (module['title'] == 'Words') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const WordsScreen(),
-                                ),
-                              ).then((_) => setState(() {}));
-                            } else if (module['title'] == 'Quiz') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const QuizScreen(),
-                                ),
-                              ).then((_) => setState(() {}));
-                            } else if (module['title'] == 'Certificate') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const CertificateScreen(),
-                                ),
-                              ).then((_) => setState(() {}));
-                            }
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: locked
-                                  ? Colors.grey[100]
-                                  : AppColors.cardCream,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: locked
-                                    ? Colors.grey[300]!
-                                    : AppColors.softBorder,
-                              ),
-                              boxShadow: locked
-                                  ? []
-                                  : [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.05),
-                                        blurRadius: 6,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                            ),
-                            child: Stack(
-                              children: [
-                                Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        module['icon'],
-                                        style: TextStyle(
-                                          fontSize: 32,
-                                          color: locked
-                                              ? Colors.grey[400]
-                                              : null,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        module['title'],
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                          color: locked
-                                              ? Colors.grey
-                                              : AppColors.darkGreen,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (locked)
-                                  Positioned(
-                                    top: 8,
-                                    right: 8,
-                                    child: Icon(
-                                      Icons.lock,
-                                      size: 16,
-                                      color: Colors.grey[500],
-                                    ),
-                                  ),
-                              ],
-                            ),
+                            builder: (context) => const ProfileScreen(),
                           ),
                         );
                       },
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.cardCream,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppColors.softBorder),
+                        ),
+                        child: const Icon(
+                          Icons.person,
+                          size: 18,
+                          color: AppColors.darkGreen,
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 20),
+                    // ---- END NEW BLOCK — Logout GestureDetector stays right after, unchanged ----
+                    GestureDetector(
+                      onTap: () async {
+                        // Sign out from Firebase so persistent login is cleared
+                        await FirebaseAuth.instance.signOut();
+                        // Reset all local progress
+                        ProgressData.instance.vowelsDone = false;
+                        ProgressData.instance.consonantsDone = false;
+                        ProgressData.instance.combinedFormsDone = false;
+                        ProgressData.instance.wordsDone = false;
+                        ProgressData.instance.quizPassed = false;
+                        ProgressData.instance.quizScore = 0;
+                        // Go back to Home Screen
+                        if (context.mounted) {
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const HomeScreen(),
+                            ),
+                            (route) => false,
+                          );
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.cardCream,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppColors.softBorder),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.logout,
+                              size: 16,
+                              color: AppColors.darkGreen,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Logout',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.darkGreen,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ),
-          ],
+
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+
+                      // ---- Overall Progress Card ----
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.cardCream,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.softBorder),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Overall Progress',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.darkGreen,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: LinearProgressIndicator(
+                                value: progress,
+                                minHeight: 12,
+                                backgroundColor: AppColors.softBorder,
+                                color: AppColors.green,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${(progress * 100).toStringAsFixed(0)}% complete',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.brown[400],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'Modules',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.darkGreen,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // ---- Modules Grid ----
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: 14,
+                              mainAxisSpacing: 14,
+                              childAspectRatio: 1.05,
+                            ),
+                        itemCount: modules.length,
+                        itemBuilder: (context, index) {
+                          final module = modules[index];
+                          final bool locked = module['locked'];
+
+                          return GestureDetector(
+                            onTap: () {
+                              if (locked) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Complete previous module first!',
+                                    ),
+                                  ),
+                                );
+                              } else if (module['title'] == 'Vowels') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const VowelsScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              } else if (module['title'] == 'Consonants') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const ConsonantsScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              } else if (module['title'] == 'Combined Forms') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const CombinedFormsScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              } else if (module['title'] == 'Words') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const WordsScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              } else if (module['title'] == 'Quiz') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const QuizScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              } else if (module['title'] == 'Certificate') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const CertificateScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              }
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: locked
+                                    ? Colors.grey[100]
+                                    : AppColors.cardCream,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: locked
+                                      ? Colors.grey[300]!
+                                      : AppColors.softBorder,
+                                ),
+                                boxShadow: locked
+                                    ? []
+                                    : [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.05),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                              ),
+                              child: Stack(
+                                children: [
+                                  Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          module['icon'],
+                                          style: TextStyle(
+                                            fontSize: 32,
+                                            color: locked
+                                                ? Colors.grey[400]
+                                                : null,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          module['title'],
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                            color: locked
+                                                ? Colors.grey
+                                                : AppColors.darkGreen,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (locked)
+                                    Positioned(
+                                      top: 8,
+                                      right: 8,
+                                      child: Icon(
+                                        Icons.lock,
+                                        size: 16,
+                                        color: Colors.grey[500],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1619,6 +2387,7 @@ class _VowelsScreenState extends State<VowelsScreen> {
   ];
 
   final Set<int> completed = {};
+  int? playingExampleIndex; // NEW
 
   @override
   void initState() {
@@ -1644,6 +2413,18 @@ class _VowelsScreenState extends State<VowelsScreen> {
         ProgressData.instance.vowelsDone = true;
       });
       await updateProgressInFirestore('vowelsDone', true);
+    }
+  }
+
+  void speakExample(int index) async {
+    final bool locked = index > completed.length;
+    if (locked)
+      return; // safety guard — locked cards can't preview example words
+    final example = vowels[index]['example']!;
+    setState(() => playingExampleIndex = index);
+    await flutterTts.speak(example);
+    if (mounted) {
+      setState(() => playingExampleIndex = null);
     }
   }
 
@@ -1797,6 +2578,8 @@ class _VowelsScreenState extends State<VowelsScreen> {
                 itemCount: vowels.length,
                 itemBuilder: (context, index) {
                   final bool done = completed.contains(index);
+                  // Only the next uncompleted letter is unlocked
+                  final bool locked = index > completed.length;
                   return MalayalamCard(
                     malayalamText: vowels[index]['letter']!,
                     englishText: vowels[index]['sound']!,
@@ -1804,7 +2587,12 @@ class _VowelsScreenState extends State<VowelsScreen> {
                     meaning: vowels[index]['meaning']!,
                     emoji: vowels[index]['emoji']!,
                     isCompleted: done,
+                    isLocked: locked,
                     onTap: () => speakAndMark(index),
+                    onExampleTap: locked
+                        ? null
+                        : () => speakExample(index), // NEW
+                    isExamplePlaying: playingExampleIndex == index,
                   );
                 },
               ),
@@ -2098,6 +2886,7 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
   ];
 
   final Set<int> completed = {};
+  int? playingExampleIndex;
 
   @override
   void initState() {
@@ -2123,6 +2912,17 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
         ProgressData.instance.consonantsDone = true;
       });
       await updateProgressInFirestore('consonantsDone', true);
+    }
+  }
+
+  void speakExample(int index) async {
+    final bool locked = index > completed.length;
+    if (locked) return;
+    final example = consonants[index]['example']!;
+    setState(() => playingExampleIndex = index);
+    await flutterTts.speak(example);
+    if (mounted) {
+      setState(() => playingExampleIndex = null);
     }
   }
 
@@ -2268,14 +3068,17 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
               child: GridView.builder(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  childAspectRatio: 0.85,
+                  crossAxisCount: 2, // CHANGED: 3 → 2 cards per row
+                  crossAxisSpacing: 14, // slightly more breathing room
+                  mainAxisSpacing: 14,
+                  childAspectRatio:
+                      1.05, // CHANGED: taller card so text has room
                 ),
                 itemCount: consonants.length,
                 itemBuilder: (context, index) {
                   final bool done = completed.contains(index);
+                  // Only the next uncompleted letter is unlocked
+                  final bool locked = index > completed.length;
                   return MalayalamCard(
                     malayalamText: consonants[index]['letter']!,
                     englishText: consonants[index]['sound']!,
@@ -2283,6 +3086,7 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
                     meaning: consonants[index]['meaning']!,
                     emoji: consonants[index]['emoji']!,
                     isCompleted: done,
+                    isLocked: locked,
                     onTap: () => speakAndMark(index),
                   );
                 },
@@ -2416,6 +3220,12 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
   // -1 means nothing is playing in that group right now
   late List<int> playingIndex;
 
+  // NEW: a group is locked until the previous group is 100% complete
+  bool isGroupLocked(int groupIndex) {
+    if (groupIndex == 0) return false; // first group always unlocked
+    return completedSets[groupIndex - 1].length < 13;
+  }
+
   // Tracks the very last form spoken anywhere, to show in the bottom mini-bar
   String? lastPlayedLabel; // e.g. "(6/13) കൂ – Koo"
 
@@ -2470,8 +3280,12 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
     super.dispose();
   }
 
-  // Speak ONE form and mark it as done
   void speakAndMark(int groupIndex, int formIndex) async {
+    // Block if the group itself is locked
+    if (isGroupLocked(groupIndex)) return;
+    // Block if this form isn't the next one in sequence
+    if (formIndex > completedSets[groupIndex].length) return;
+
     final form = groupedForms[groupIndex][formIndex];
     setState(() {
       playingIndex[groupIndex] = formIndex;
@@ -2486,8 +3300,8 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
     checkIfEverythingDone();
   }
 
-  // Speak ALL 13 forms in a group, one after another
   void playAllForGroup(int groupIndex) async {
+    if (isGroupLocked(groupIndex)) return; // NEW guard
     for (int formIndex = 0; formIndex < 13; formIndex++) {
       final form = groupedForms[groupIndex][formIndex];
       setState(() {
@@ -2496,7 +3310,6 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
             '(${formIndex + 1}/13) ${form['letter']} – ${form['sound']}';
       });
       await flutterTts.speak(form['letter']!);
-      // Small pause so the highlight is visible before moving to the next one
       await Future.delayed(const Duration(milliseconds: 500));
       setState(() => completedSets[groupIndex].add(formIndex));
     }
@@ -2697,6 +3510,7 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
                 itemBuilder: (context, groupIndex) {
                   final int doneCount = completedSets[groupIndex].length;
                   final bool groupDone = doneCount == 13;
+                  final bool groupLocked = isGroupLocked(groupIndex); // NEW
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 14),
@@ -2719,6 +3533,8 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
                       child: ExpansionTile(
                         key: PageStorageKey(baseConsonants[groupIndex]),
                         tilePadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+                        enabled:
+                            !groupLocked, // NEW — prevents expanding locked groups
                         iconColor: AppColors.darkGreen,
                         collapsedIconColor: AppColors.darkGreen,
                         leading: Container(
@@ -2726,21 +3542,25 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
                           height: 36,
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: AppColors.green.withOpacity(0.12),
+                            color: groupLocked
+                                ? Colors.grey.withOpacity(0.15)
+                                : AppColors.green.withOpacity(0.12),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
-                            Icons.link,
-                            color: AppColors.green,
+                          child: Icon(
+                            groupLocked ? Icons.lock : Icons.link,
+                            color: groupLocked ? Colors.grey : AppColors.green,
                             size: 18,
                           ),
                         ),
                         title: Text(
                           '${baseConsonants[groupIndex]}-vargam combinations',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: AppColors.darkGreen,
+                            color: groupLocked
+                                ? Colors.grey
+                                : AppColors.darkGreen,
                           ),
                         ),
                         trailing: Row(
@@ -2799,7 +3619,9 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
                                     borderRadius: BorderRadius.circular(24),
                                   ),
                                 ),
-                                onPressed: playingIndex[groupIndex] == -1
+                                onPressed:
+                                    (playingIndex[groupIndex] == -1 &&
+                                        !groupLocked)
                                     ? () => playAllForGroup(groupIndex)
                                     : null,
                                 icon: const Icon(Icons.play_arrow),
@@ -2827,19 +3649,29 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
                                   .contains(formIndex);
                               final bool playing =
                                   playingIndex[groupIndex] == formIndex;
+                              // NEW: only the next form in sequence is tappable
+                              final bool formLocked =
+                                  groupLocked ||
+                                  formIndex > completedSets[groupIndex].length;
                               final form = groupedForms[groupIndex][formIndex];
 
                               return GestureDetector(
-                                onTap: playingIndex[groupIndex] == -1
+                                onTap:
+                                    (playingIndex[groupIndex] == -1 &&
+                                        !formLocked)
                                     ? () => speakAndMark(groupIndex, formIndex)
                                     : null,
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 200),
                                   decoration: BoxDecoration(
-                                    color: AppColors.cream,
+                                    color: formLocked
+                                        ? Colors.grey[100]
+                                        : AppColors.cream,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: playing
+                                      color: formLocked
+                                          ? Colors.grey[300]!
+                                          : playing
                                           ? AppColors.gold
                                           : (done
                                                 ? AppColors.green
@@ -2855,22 +3687,27 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
                                               MainAxisAlignment.center,
                                           children: [
                                             Text(
-                                              form['letter']!,
-                                              style: const TextStyle(
+                                              formLocked
+                                                  ? '🔒'
+                                                  : form['letter']!,
+                                              style: TextStyle(
                                                 fontSize: 18,
                                                 fontWeight: FontWeight.bold,
-                                                color: AppColors.darkGreen,
+                                                color: formLocked
+                                                    ? Colors.grey[400]
+                                                    : AppColors.darkGreen,
                                               ),
                                             ),
                                             const SizedBox(height: 2),
-                                            Text(
-                                              form['sound']!,
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: AppColors.gold,
-                                                fontWeight: FontWeight.w600,
+                                            if (!formLocked)
+                                              Text(
+                                                form['sound']!,
+                                                style: const TextStyle(
+                                                  fontSize: 10,
+                                                  color: AppColors.gold,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
                                               ),
-                                            ),
                                           ],
                                         ),
                                       ),
@@ -3212,6 +4049,14 @@ class _WordsScreenState extends State<WordsScreen> {
   ];
 
   final Map<int, Set<int>> completedPerCategory = {};
+  // NEW: a category is locked until the previous category is fully done
+  bool isCategoryLocked(int catIndex) {
+    if (catIndex == 0) return false; // first category always unlocked
+    final prevWordsCount = (categories[catIndex - 1]['words'] as List).length;
+    final prevDone = completedPerCategory[catIndex - 1]?.length ?? 0;
+    return prevDone < prevWordsCount;
+  }
+
   String studentName = '';
 
   Future<void> loadStudentName() async {
@@ -3398,35 +4243,52 @@ class _WordsScreenState extends State<WordsScreen> {
                   final words = cat['words'] as List;
                   final doneCount = completedPerCategory[index]?.length ?? 0;
                   final isDone = doneCount == words.length;
+                  final bool locked = isCategoryLocked(index); // NEW
                   return GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => WordCategoryScreen(
-                          categoryName: cat['name'],
-                          words: words.cast<Map<String, String>>(),
-                          initialCompleted: completedPerCategory[index] ?? {},
-                          onWordCompleted: (wi) => onWordCompleted(index, wi),
-                        ),
-                      ),
-                    ).then((_) => setState(() {})),
+                    onTap: locked
+                        ? () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Complete the previous category first!',
+                                ),
+                              ),
+                            );
+                          }
+                        : () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => WordCategoryScreen(
+                                categoryName: cat['name'],
+                                words: words.cast<Map<String, String>>(),
+                                initialCompleted:
+                                    completedPerCategory[index] ?? {},
+                                onWordCompleted: (wi) =>
+                                    onWordCompleted(index, wi),
+                              ),
+                            ),
+                          ).then((_) => setState(() {})),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: AppColors.cardCream,
+                        color: locked ? Colors.grey[100] : AppColors.cardCream,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: isDone
+                          color: locked
+                              ? Colors.grey[300]!
+                              : isDone
                               ? AppColors.green
                               : AppColors.softBorder,
                           width: isDone ? 2 : 1,
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
+                        boxShadow: locked
+                            ? []
+                            : [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                       ),
                       child: Stack(
                         children: [
@@ -3435,26 +4297,32 @@ class _WordsScreenState extends State<WordsScreen> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
-                                  cat['emoji'],
-                                  style: const TextStyle(fontSize: 34),
+                                  locked ? '🔒' : cat['emoji'],
+                                  style: TextStyle(
+                                    fontSize: 34,
+                                    color: locked ? Colors.grey[400] : null,
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
                                   cat['name'],
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 14,
-                                    color: AppColors.darkGreen,
+                                    color: locked
+                                        ? Colors.grey
+                                        : AppColors.darkGreen,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
-                                Text(
-                                  '$doneCount / ${words.length}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.brown[400],
+                                if (!locked)
+                                  Text(
+                                    '$doneCount / ${words.length}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.brown[400],
+                                    ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
@@ -3519,6 +4387,8 @@ class _WordCategoryScreenState extends State<WordCategoryScreen> {
   }
 
   void speakAndMark(int index) async {
+    // NEW: only allow the next word in sequence
+    if (index > completed.length) return;
     setState(() => currentlyPlaying = index);
     await flutterTts.speak(widget.words[index]['malayalam']!);
     setState(() {
@@ -3634,6 +4504,7 @@ class _WordCategoryScreenState extends State<WordCategoryScreen> {
                   final word = widget.words[index];
                   final bool done = completed.contains(index);
                   final bool playing = currentlyPlaying == index;
+                  final bool locked = index > completed.length; // NEW
                   return MalayalamCard(
                     malayalamText: word['malayalam']!,
                     englishText: word['pronunciation']!,
@@ -3642,6 +4513,7 @@ class _WordCategoryScreenState extends State<WordCategoryScreen> {
                     emoji: word['emoji']!,
                     isCompleted: done,
                     isPlaying: playing,
+                    isLocked: locked, // NEW
                     onTap: () => speakAndMark(index),
                   );
                 },
@@ -4109,13 +4981,8 @@ class _QuizScreenState extends State<QuizScreen> {
                       Divider(color: AppColors.softBorder, thickness: 1),
                       const SizedBox(height: 16),
 
-                      GridView.count(
-                        crossAxisCount: 2,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                        childAspectRatio: 2.4,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: options.map((option) {
                           Color borderColor = AppColors.softBorder;
                           Color bgColor = AppColors.cream;
@@ -4132,55 +4999,68 @@ class _QuizScreenState extends State<QuizScreen> {
                             borderColor = AppColors.gold;
                           }
 
-                          return GestureDetector(
-                            onTap: () => selectAnswer(option),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: bgColor,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: borderColor,
-                                  width: 1.5,
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: GestureDetector(
+                              onTap: () => selectAnswer(option),
+                              child: Container(
+                                width: double.infinity,
+                                constraints: const BoxConstraints(
+                                  minHeight: 56,
                                 ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 32,
-                                    height: 32,
-                                    decoration: const BoxDecoration(
-                                      color: AppColors.gold,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.volume_up,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: bgColor,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: borderColor,
+                                    width: 1.5,
                                   ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      option,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.darkGreen,
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 32,
+                                      decoration: const BoxDecoration(
+                                        color: AppColors.gold,
+                                        shape: BoxShape.circle,
                                       ),
-                                      overflow: TextOverflow.ellipsis,
+                                      child: const Icon(
+                                        Icons.volume_up,
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
                                     ),
-                                  ),
-                                  Text(
-                                    '🌿',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.green.withOpacity(0.4),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        option,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.darkGreen,
+                                        ),
+                                        softWrap:
+                                            true, // NEW: wrap instead of clip
+                                        overflow: TextOverflow
+                                            .visible, // NEW: never cut off
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '🌿',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.green.withOpacity(0.4),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           );
@@ -4531,13 +5411,14 @@ class _CertificateScreenState extends State<CertificateScreen> {
 
 // ---------- FACULTY SCREEN ----------
 class FacultyScreen extends StatefulWidget {
-  const FacultyScreen({super.key});
+  final String className; // typed by faculty on ClassAccessScreen
+  const FacultyScreen({super.key, required this.className});
+
   @override
   State<FacultyScreen> createState() => _FacultyScreenState();
 }
 
 class _FacultyScreenState extends State<FacultyScreen> {
-  // This will hold the list of completed students from Firestore
   List<Map<String, dynamic>> completedStudents = [];
   bool isLoading = true;
 
@@ -4547,12 +5428,12 @@ class _FacultyScreenState extends State<FacultyScreen> {
     loadCompletedStudents();
   }
 
-  // Fetch all students where completed == true from Firestore
   Future<void> loadCompletedStudents() async {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('students')
           .where('completed', isEqualTo: true)
+          .where('studentClass', isEqualTo: widget.className)
           .get();
 
       setState(() {
@@ -4560,7 +5441,7 @@ class _FacultyScreenState extends State<FacultyScreen> {
         isLoading = false;
       });
     } catch (e) {
-      print('❌ Error loading students: $e');
+      debugPrint('❌ Error loading students: $e');
       setState(() => isLoading = false);
     }
   }
@@ -4569,9 +5450,8 @@ class _FacultyScreenState extends State<FacultyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Faculty Portal'),
+        title: Text('Faculty Portal — ${widget.className}'),
         actions: [
-          // Refresh button to reload the list
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
@@ -4579,37 +5459,59 @@ class _FacultyScreenState extends State<FacultyScreen> {
               loadCompletedStudents();
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.swap_horiz),
+            tooltip: 'Switch Class',
+            onPressed: () {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ClassAccessScreen(),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const HomeScreen()),
+                  (route) => false,
+                );
+              }
+            },
+          ),
         ],
       ),
       body: isLoading
-          // Show loading spinner while fetching
           ? const Center(child: CircularProgressIndicator())
-          // Show empty message if no students completed yet
           : completedStudents.isEmpty
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('🧑‍🏫', style: TextStyle(fontSize: 60)),
-                  SizedBox(height: 16),
+                  const Text('🧑‍🏫', style: TextStyle(fontSize: 60)),
+                  const SizedBox(height: 16),
                   Text(
-                    'No students have completed the course yet.',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                    'No students in "${widget.className}" have completed the course yet.',
+                    style: const TextStyle(fontSize: 16, color: Colors.grey),
                     textAlign: TextAlign.center,
                   ),
                 ],
               ),
             )
-          // Show list of completed students
           : Column(
               children: [
-                // Header showing count
                 Container(
                   width: double.infinity,
                   color: Colors.green[50],
                   padding: const EdgeInsets.all(12),
                   child: Text(
-                    '🏆 ${completedStudents.length} student(s) completed the course',
+                    '🏆 ${completedStudents.length} student(s) completed in ${widget.className}',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
@@ -4617,7 +5519,6 @@ class _FacultyScreenState extends State<FacultyScreen> {
                     ),
                   ),
                 ),
-                // Student list
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.all(12),
@@ -4636,7 +5537,6 @@ class _FacultyScreenState extends State<FacultyScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Name + completion badge
                               Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
@@ -4655,20 +5555,20 @@ class _FacultyScreenState extends State<FacultyScreen> {
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              // Class
                               Row(
                                 children: [
                                   const Icon(
-                                    Icons.school,
+                                    Icons.badge,
                                     size: 16,
                                     color: Colors.grey,
                                   ),
                                   const SizedBox(width: 6),
-                                  Text('Class: ${student['class'] ?? '-'}'),
+                                  Text(
+                                    'Reg No: ${student['registerNumber'] ?? '-'}',
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              // Email
                               Row(
                                 children: [
                                   const Icon(
@@ -4681,7 +5581,6 @@ class _FacultyScreenState extends State<FacultyScreen> {
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              // Phone
                               Row(
                                 children: [
                                   const Icon(
@@ -4694,7 +5593,6 @@ class _FacultyScreenState extends State<FacultyScreen> {
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              // Score
                               Row(
                                 children: [
                                   const Icon(
@@ -4709,7 +5607,6 @@ class _FacultyScreenState extends State<FacultyScreen> {
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              // Completion date
                               Row(
                                 children: [
                                   const Icon(
@@ -4736,7 +5633,6 @@ class _FacultyScreenState extends State<FacultyScreen> {
     );
   }
 
-  // Converts "2024-01-15T10:30:00" to "15/01/2024"
   String _formatDate(String? dateString) {
     if (dateString == null) return '-';
     try {
