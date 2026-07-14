@@ -50,15 +50,19 @@ class ProgressData {
 }
 
 // ---------- FIRESTORE PROGRESS HELPER ----------
-// One shared function every screen can call to update this student's
-// progress flag in Firestore, using whichever account is currently logged in.
+
 Future<void> updateProgressInFirestore(String fieldName, dynamic value) async {
   final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return; // safety check — should never happen if logged in
+  if (user == null) return;
 
-  await FirebaseFirestore.instance.collection('students').doc(user.uid).update({
-    fieldName: value,
-  });
+  try {
+    await FirebaseFirestore.instance
+        .collection('students')
+        .doc(user.uid)
+        .update({fieldName: value});
+  } catch (e) {
+    debugPrint('❌ Failed to save $fieldName: $e');
+  }
 }
 
 // ---------- REUSABLE MALAYALAM CARD WIDGET ----------
@@ -71,6 +75,7 @@ class MalayalamCard extends StatelessWidget {
   final bool isCompleted;
   final bool isPlaying;
   final bool isLocked;
+  final bool isDisabledByAudio;
   final VoidCallback onTap;
 
   // NEW: example word pronunciation support
@@ -88,6 +93,7 @@ class MalayalamCard extends StatelessWidget {
     required this.onTap,
     this.isPlaying = false,
     this.isLocked = false,
+    this.isDisabledByAudio = false,
     this.onExampleTap,
     this.isExamplePlaying = false,
   });
@@ -95,17 +101,23 @@ class MalayalamCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: isLocked ? null : onTap,
+      onTap: (isLocked || isDisabledByAudio) ? null : onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
-          color: isLocked ? Colors.grey[100] : AppColors.cardCream,
+          color: isLocked
+              ? Colors.grey[100]
+              : isDisabledByAudio
+              ? Colors.grey[50] // NEW — subtler dim, distinct from a real lock
+              : AppColors.cardCream,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isLocked
                 ? Colors.grey[300]!
                 : isPlaying
                 ? AppColors.gold
+                : isDisabledByAudio
+                ? Colors.grey[200]! // NEW
                 : AppColors.softBorder,
             width: isPlaying ? 2.5 : 1,
           ),
@@ -128,11 +140,15 @@ class MalayalamCard extends StatelessWidget {
                     MainAxisSize.min, // NEW — column only takes needed height
                 children: [
                   Text(
-                    isLocked ? '🔒' : malayalamText,
+                    isLocked ? '' : malayalamText,
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
-                      color: isLocked ? Colors.grey[400] : AppColors.darkGreen,
+                      color: isLocked
+                          ? Colors.grey[300]
+                          : isDisabledByAudio
+                          ? Colors.grey[350]
+                          : AppColors.darkGreen,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -895,6 +911,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                                   'quizPassed': false,
                                   'quizScore': 0,
                                   'completed': false,
+                                  'vowelsCompletedCount': 0,
+                                  'consonantsCompletedCount': 0,
+                                  'combinedFormsCompletedCounts': List.filled(
+                                    36,
+                                    0,
+                                  ),
+                                  'wordsCompletedCounts': <String, int>{},
                                   'createdAt': FieldValue.serverTimestamp(),
                                 });
                             // NEW: role lookup doc — Security Rules check this
@@ -2388,12 +2411,37 @@ class _VowelsScreenState extends State<VowelsScreen> {
 
   final Set<int> completed = {};
   int? playingExampleIndex; // NEW
+  int?
+  playingLetterIndex; // NEW — tracks which letter card is currently speaking
+  bool get isAnyAudioPlaying =>
+      playingLetterIndex != null || playingExampleIndex != null; // NEW
+  bool isLoadingProgress = true;
+
+  Future<void> loadCompletedProgress() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => isLoadingProgress = false); // ADD
+      return;
+    }
+    final doc = await FirebaseFirestore.instance
+        .collection('students')
+        .doc(user.uid)
+        .get();
+    final count = doc.data()?['vowelsCompletedCount'] ?? 0;
+    if (mounted) {
+      setState(() {
+        completed.addAll(List.generate(count as int, (i) => i));
+        isLoadingProgress = false; // ADD
+      });
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     flutterTts.setLanguage("ml-IN");
     loadStudentName();
+    loadCompletedProgress();
   }
 
   @override
@@ -2403,23 +2451,33 @@ class _VowelsScreenState extends State<VowelsScreen> {
   }
 
   void speakAndMark(int index) async {
+    if (isAnyAudioPlaying) return;
     final letter = vowels[index]['letter']!;
+    setState(() => playingLetterIndex = index);
     await flutterTts.speak(letter);
     setState(() {
       completed.add(index);
+      playingLetterIndex = null;
     });
+
+    // Check completion FIRST — this must not depend on any Firestore call succeeding
     if (completed.length == vowels.length) {
       setState(() {
         ProgressData.instance.vowelsDone = true;
       });
+    }
+
+    // Persist afterwards — failures here no longer block the unlock logic
+    await updateProgressInFirestore('vowelsCompletedCount', completed.length);
+    if (ProgressData.instance.vowelsDone) {
       await updateProgressInFirestore('vowelsDone', true);
     }
   }
 
   void speakExample(int index) async {
     final bool locked = index > completed.length;
-    if (locked)
-      return; // safety guard — locked cards can't preview example words
+    if (locked || isAnyAudioPlaying)
+      return; // NEW — also blocked during playback
     final example = vowels[index]['example']!;
     setState(() => playingExampleIndex = index);
     await flutterTts.speak(example);
@@ -2567,35 +2625,44 @@ class _VowelsScreenState extends State<VowelsScreen> {
               ),
 
             Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 0.85,
-                ),
-                itemCount: vowels.length,
-                itemBuilder: (context, index) {
-                  final bool done = completed.contains(index);
-                  // Only the next uncompleted letter is unlocked
-                  final bool locked = index > completed.length;
-                  return MalayalamCard(
-                    malayalamText: vowels[index]['letter']!,
-                    englishText: vowels[index]['sound']!,
-                    example: vowels[index]['example']!,
-                    meaning: vowels[index]['meaning']!,
-                    emoji: vowels[index]['emoji']!,
-                    isCompleted: done,
-                    isLocked: locked,
-                    onTap: () => speakAndMark(index),
-                    onExampleTap: locked
-                        ? null
-                        : () => speakExample(index), // NEW
-                    isExamplePlaying: playingExampleIndex == index,
-                  );
-                },
-              ),
+              child: isLoadingProgress
+                  ? const Center(
+                      child: CircularProgressIndicator(color: AppColors.green),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 12,
+                            mainAxisSpacing: 12,
+                            childAspectRatio: 0.85,
+                          ),
+                      itemCount: vowels.length,
+                      itemBuilder: (context, index) {
+                        final bool done = completed.contains(index);
+                        final bool sequentiallyLocked =
+                            index > completed.length;
+                        final bool audioLockOthers =
+                            isAnyAudioPlaying && playingLetterIndex != index;
+                        return MalayalamCard(
+                          malayalamText: vowels[index]['letter']!,
+                          englishText: vowels[index]['sound']!,
+                          example: vowels[index]['example']!,
+                          meaning: vowels[index]['meaning']!,
+                          emoji: vowels[index]['emoji']!,
+                          isCompleted: done,
+                          isPlaying: playingLetterIndex == index,
+                          isLocked: sequentiallyLocked,
+                          isDisabledByAudio: audioLockOthers,
+                          onTap: () => speakAndMark(index),
+                          onExampleTap: sequentiallyLocked
+                              ? null
+                              : () => speakExample(index),
+                          isExamplePlaying: playingExampleIndex == index,
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -2887,12 +2954,33 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
 
   final Set<int> completed = {};
   int? playingExampleIndex;
+  bool isLoadingProgress = true;
+
+  Future<void> loadCompletedProgress() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => isLoadingProgress = false);
+      return;
+    }
+    final doc = await FirebaseFirestore.instance
+        .collection('students')
+        .doc(user.uid)
+        .get();
+    final count = doc.data()?['consonantsCompletedCount'] ?? 0;
+    if (mounted) {
+      setState(() {
+        completed.addAll(List.generate(count as int, (i) => i));
+        isLoadingProgress = false;
+      });
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     flutterTts.setLanguage("ml-IN");
     loadStudentName();
+    loadCompletedProgress();
   }
 
   @override
@@ -2907,10 +2995,18 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
     setState(() {
       completed.add(index);
     });
+
     if (completed.length == consonants.length) {
       setState(() {
         ProgressData.instance.consonantsDone = true;
       });
+    }
+
+    await updateProgressInFirestore(
+      'consonantsCompletedCount',
+      completed.length,
+    );
+    if (ProgressData.instance.consonantsDone) {
       await updateProgressInFirestore('consonantsDone', true);
     }
   }
@@ -3065,32 +3161,42 @@ class _ConsonantsScreenState extends State<ConsonantsScreen> {
               ),
 
             Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2, // CHANGED: 3 → 2 cards per row
-                  crossAxisSpacing: 14, // slightly more breathing room
-                  mainAxisSpacing: 14,
-                  childAspectRatio:
-                      1.05, // CHANGED: taller card so text has room
-                ),
-                itemCount: consonants.length,
-                itemBuilder: (context, index) {
-                  final bool done = completed.contains(index);
-                  // Only the next uncompleted letter is unlocked
-                  final bool locked = index > completed.length;
-                  return MalayalamCard(
-                    malayalamText: consonants[index]['letter']!,
-                    englishText: consonants[index]['sound']!,
-                    example: consonants[index]['example']!,
-                    meaning: consonants[index]['meaning']!,
-                    emoji: consonants[index]['emoji']!,
-                    isCompleted: done,
-                    isLocked: locked,
-                    onTap: () => speakAndMark(index),
-                  );
-                },
-              ),
+              child: isLoadingProgress
+                  ? const Center(
+                      child: CircularProgressIndicator(color: AppColors.green),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2, // CHANGED: 3 → 2 cards per row
+                            crossAxisSpacing:
+                                14, // slightly more breathing room
+                            mainAxisSpacing: 14,
+                            childAspectRatio:
+                                1.05, // CHANGED: taller card so text has room
+                          ),
+                      itemCount: consonants.length,
+                      itemBuilder: (context, index) {
+                        final bool done = completed.contains(index);
+                        // Only the next uncompleted letter is unlocked
+                        final bool locked = index > completed.length;
+                        return MalayalamCard(
+                          malayalamText: consonants[index]['letter']!,
+                          englishText: consonants[index]['sound']!,
+                          example: consonants[index]['example']!,
+                          meaning: consonants[index]['meaning']!,
+                          emoji: consonants[index]['emoji']!,
+                          isCompleted: done,
+                          isLocked: locked,
+                          onTap: () => speakAndMark(index),
+                          onExampleTap: locked
+                              ? null
+                              : () => speakExample(index), // ADD THIS
+                          isExamplePlaying: playingExampleIndex == index,
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -3207,9 +3313,11 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
     {'sign': 'ൈ', 'suffix': 'ai'},
     {'sign': 'ൊ', 'suffix': 'o'},
     {'sign': 'ോ', 'suffix': 'oo'},
-    {'sign': 'ൌ', 'suffix': 'au'},
+    {
+      'sign': 'ൌ',
+      'suffix': 'au',
+    }, // CHANGED — modern decomposed AU (U+0D46 + U+0D57), better TTS support than old U+0D4C
   ];
-
   // groupedForms[i] = the 13 combined forms that belong to baseConsonants[i]
   late List<List<Map<String, String>>> groupedForms;
 
@@ -3232,6 +3340,7 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
   // Holds the real logged-in student's name, fetched from Firestore.
   // Starts empty while we are still loading it.
   String studentName = '';
+  bool isLoadingProgress = true;
 
   // Asks Firebase "who is logged in?" then reads that student's name
   // from the 'students' collection in Firestore.
@@ -3251,11 +3360,33 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
     }
   }
 
+  Future<void> loadCompletedProgress() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => isLoadingProgress = false);
+      return;
+    }
+    final doc = await FirebaseFirestore.instance
+        .collection('students')
+        .doc(user.uid)
+        .get();
+    final raw = doc.data()?['combinedFormsCompletedCounts'];
+    if (!mounted) return;
+    if (raw != null) {
+      final counts = List<int>.from(raw);
+      for (int g = 0; g < counts.length && g < completedSets.length; g++) {
+        completedSets[g].addAll(List.generate(counts[g], (i) => i));
+      }
+    }
+    setState(() => isLoadingProgress = false);
+  }
+
   @override
   void initState() {
     super.initState();
     flutterTts.setLanguage("ml-IN");
     loadStudentName(); // fetch the real student's name as soon as screen opens
+    loadCompletedProgress(); // fetch completed progress as soon as screen opens
 
     groupedForms = List.generate(baseConsonants.length, (i) {
       // Remove the trailing "a" from the base sound to get the root sound
@@ -3280,6 +3411,11 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
     super.dispose();
   }
 
+  Future<void> saveGroupProgress() async {
+    final counts = completedSets.map((s) => s.length).toList();
+    await updateProgressInFirestore('combinedFormsCompletedCounts', counts);
+  }
+
   void speakAndMark(int groupIndex, int formIndex) async {
     // Block if the group itself is locked
     if (isGroupLocked(groupIndex)) return;
@@ -3297,6 +3433,7 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
       completedSets[groupIndex].add(formIndex);
       playingIndex[groupIndex] = -1;
     });
+    await saveGroupProgress();
     checkIfEverythingDone();
   }
 
@@ -3314,10 +3451,10 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
       setState(() => completedSets[groupIndex].add(formIndex));
     }
     setState(() => playingIndex[groupIndex] = -1);
+    await saveGroupProgress();
     checkIfEverythingDone();
   }
 
-  // If every single form in every group is completed, unlock Words
   void checkIfEverythingDone() async {
     int totalDone = 0;
     for (final set in completedSets) {
@@ -3325,9 +3462,9 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
     }
     if (totalDone == baseConsonants.length * 13) {
       setState(() {
-        ProgressData.instance.combinedFormsDone = true;
+        ProgressData.instance.combinedFormsDone = true; // set locally first
       });
-      await updateProgressInFirestore('combinedFormsDone', true);
+      await updateProgressInFirestore('combinedFormsDone', true); // then save
     }
   }
 
@@ -3504,236 +3641,265 @@ class _CombinedFormsScreenState extends State<CombinedFormsScreen> {
 
             // ---- The expandable list ----
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                itemCount: baseConsonants.length,
-                itemBuilder: (context, groupIndex) {
-                  final int doneCount = completedSets[groupIndex].length;
-                  final bool groupDone = doneCount == 13;
-                  final bool groupLocked = isGroupLocked(groupIndex); // NEW
+              child: isLoadingProgress
+                  ? const Center(
+                      child: CircularProgressIndicator(color: AppColors.green),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      itemCount: baseConsonants.length,
+                      itemBuilder: (context, groupIndex) {
+                        final int doneCount = completedSets[groupIndex].length;
+                        final bool groupDone = doneCount == 13;
+                        final bool groupLocked = isGroupLocked(
+                          groupIndex,
+                        ); // NEW
 
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.cardCream,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.softBorder),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: Theme(
-                      data: Theme.of(
-                        context,
-                      ).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        key: PageStorageKey(baseConsonants[groupIndex]),
-                        tilePadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
-                        enabled:
-                            !groupLocked, // NEW — prevents expanding locked groups
-                        iconColor: AppColors.darkGreen,
-                        collapsedIconColor: AppColors.darkGreen,
-                        leading: Container(
-                          width: 36,
-                          height: 36,
-                          alignment: Alignment.center,
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 14),
                           decoration: BoxDecoration(
-                            color: groupLocked
-                                ? Colors.grey.withOpacity(0.15)
-                                : AppColors.green.withOpacity(0.12),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            groupLocked ? Icons.lock : Icons.link,
-                            color: groupLocked ? Colors.grey : AppColors.green,
-                            size: 18,
-                          ),
-                        ),
-                        title: Text(
-                          '${baseConsonants[groupIndex]}-vargam combinations',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: groupLocked
-                                ? Colors.grey
-                                : AppColors.darkGreen,
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
+                            color: AppColors.cardCream,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.softBorder),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.04),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
                               ),
-                              decoration: BoxDecoration(
-                                color: groupDone
-                                    ? AppColors.green.withOpacity(0.15)
-                                    : AppColors.cream,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: AppColors.softBorder),
+                            ],
+                          ),
+                          child: Theme(
+                            data: Theme.of(
+                              context,
+                            ).copyWith(dividerColor: Colors.transparent),
+                            child: ExpansionTile(
+                              key: PageStorageKey(baseConsonants[groupIndex]),
+                              tilePadding: const EdgeInsets.fromLTRB(
+                                16,
+                                8,
+                                12,
+                                8,
                               ),
-                              child: Text(
-                                '$doneCount/13',
+                              enabled:
+                                  !groupLocked, // NEW — prevents expanding locked groups
+                              iconColor: AppColors.darkGreen,
+                              collapsedIconColor: AppColors.darkGreen,
+                              leading: Container(
+                                width: 36,
+                                height: 36,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: groupLocked
+                                      ? Colors.grey.withOpacity(0.15)
+                                      : AppColors.green.withOpacity(0.12),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons
+                                      .link, // same icon whether locked or not — no lock symbol
+                                  color: groupLocked
+                                      ? Colors.grey[400]
+                                      : AppColors.green,
+                                  size: 18,
+                                ),
+                              ),
+                              title: Text(
+                                '${baseConsonants[groupIndex]}-vargam combinations',
                                 style: TextStyle(
-                                  color: groupDone
-                                      ? AppColors.green
-                                      : Colors.brown[400],
+                                  fontSize: 16,
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                                  color: groupLocked
+                                      ? Colors.grey
+                                      : AppColors.darkGreen,
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            if (groupDone)
-                              const Icon(
-                                Icons.check_circle,
-                                color: AppColors.green,
-                                size: 18,
-                              )
-                            else
-                              const Icon(
-                                Icons.expand_more,
-                                color: AppColors.darkGreen,
-                              ),
-                          ],
-                        ),
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.green,
-                                  foregroundColor: AppColors.cardCream,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(24),
-                                  ),
-                                ),
-                                onPressed:
-                                    (playingIndex[groupIndex] == -1 &&
-                                        !groupLocked)
-                                    ? () => playAllForGroup(groupIndex)
-                                    : null,
-                                icon: const Icon(Icons.play_arrow),
-                                label: const Text('Play All 13 Forms'),
-                              ),
-                            ),
-                          ),
-                          GridView.builder(
-                            key: PageStorageKey(
-                              '${baseConsonants[groupIndex]}_grid',
-                            ),
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(12),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 3,
-                                  crossAxisSpacing: 10,
-                                  mainAxisSpacing: 10,
-                                  childAspectRatio: 1.1,
-                                ),
-                            itemCount: 13,
-                            itemBuilder: (context, formIndex) {
-                              final bool done = completedSets[groupIndex]
-                                  .contains(formIndex);
-                              final bool playing =
-                                  playingIndex[groupIndex] == formIndex;
-                              // NEW: only the next form in sequence is tappable
-                              final bool formLocked =
-                                  groupLocked ||
-                                  formIndex > completedSets[groupIndex].length;
-                              final form = groupedForms[groupIndex][formIndex];
-
-                              return GestureDetector(
-                                onTap:
-                                    (playingIndex[groupIndex] == -1 &&
-                                        !formLocked)
-                                    ? () => speakAndMark(groupIndex, formIndex)
-                                    : null,
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  decoration: BoxDecoration(
-                                    color: formLocked
-                                        ? Colors.grey[100]
-                                        : AppColors.cream,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: formLocked
-                                          ? Colors.grey[300]!
-                                          : playing
-                                          ? AppColors.gold
-                                          : (done
-                                                ? AppColors.green
-                                                : AppColors.softBorder),
-                                      width: playing || done ? 2 : 1,
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: groupDone
+                                          ? AppColors.green.withOpacity(0.15)
+                                          : AppColors.cream,
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: AppColors.softBorder,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '$doneCount/13',
+                                      style: TextStyle(
+                                        color: groupDone
+                                            ? AppColors.green
+                                            : Colors.brown[400],
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                   ),
-                                  child: Stack(
-                                    children: [
-                                      Center(
-                                        child: Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
+                                  const SizedBox(width: 6),
+                                  if (groupDone)
+                                    const Icon(
+                                      Icons.check_circle,
+                                      color: AppColors.green,
+                                      size: 18,
+                                    )
+                                  else
+                                    const Icon(
+                                      Icons.expand_more,
+                                      color: AppColors.darkGreen,
+                                    ),
+                                ],
+                              ),
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.green,
+                                        foregroundColor: AppColors.cardCream,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            24,
+                                          ),
+                                        ),
+                                      ),
+                                      onPressed:
+                                          (playingIndex[groupIndex] == -1 &&
+                                              !groupLocked)
+                                          ? () => playAllForGroup(groupIndex)
+                                          : null,
+                                      icon: const Icon(Icons.play_arrow),
+                                      label: const Text('Play All 13 Forms'),
+                                    ),
+                                  ),
+                                ),
+                                GridView.builder(
+                                  key: PageStorageKey(
+                                    '${baseConsonants[groupIndex]}_grid',
+                                  ),
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  padding: const EdgeInsets.all(12),
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: 3,
+                                        crossAxisSpacing: 10,
+                                        mainAxisSpacing: 10,
+                                        childAspectRatio: 1.1,
+                                      ),
+                                  itemCount: 13,
+                                  itemBuilder: (context, formIndex) {
+                                    final bool done = completedSets[groupIndex]
+                                        .contains(formIndex);
+                                    final bool playing =
+                                        playingIndex[groupIndex] == formIndex;
+                                    // NEW: only the next form in sequence is tappable
+                                    final bool formLocked =
+                                        groupLocked ||
+                                        formIndex >
+                                            completedSets[groupIndex].length;
+                                    final form =
+                                        groupedForms[groupIndex][formIndex];
+
+                                    return GestureDetector(
+                                      onTap:
+                                          (playingIndex[groupIndex] == -1 &&
+                                              !formLocked)
+                                          ? () => speakAndMark(
+                                              groupIndex,
+                                              formIndex,
+                                            )
+                                          : null,
+                                      child: AnimatedContainer(
+                                        duration: const Duration(
+                                          milliseconds: 200,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: formLocked
+                                              ? Colors.grey[100]
+                                              : AppColors.cream,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          border: Border.all(
+                                            color: formLocked
+                                                ? Colors.grey[300]!
+                                                : playing
+                                                ? AppColors.gold
+                                                : (done
+                                                      ? AppColors.green
+                                                      : AppColors.softBorder),
+                                            width: playing || done ? 2 : 1,
+                                          ),
+                                        ),
+                                        child: Stack(
                                           children: [
-                                            Text(
-                                              formLocked
-                                                  ? '🔒'
-                                                  : form['letter']!,
-                                              style: TextStyle(
-                                                fontSize: 18,
-                                                fontWeight: FontWeight.bold,
-                                                color: formLocked
-                                                    ? Colors.grey[400]
-                                                    : AppColors.darkGreen,
+                                            Center(
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Text(
+                                                    formLocked
+                                                        ? ''
+                                                        : form['letter']!,
+                                                    style: TextStyle(
+                                                      fontSize: 18,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: formLocked
+                                                          ? Colors.grey[300]
+                                                          : AppColors.darkGreen,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  if (!formLocked)
+                                                    Text(
+                                                      form['sound']!,
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                        color: AppColors.gold,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                ],
                                               ),
                                             ),
-                                            const SizedBox(height: 2),
-                                            if (!formLocked)
-                                              Text(
-                                                form['sound']!,
-                                                style: const TextStyle(
-                                                  fontSize: 10,
-                                                  color: AppColors.gold,
-                                                  fontWeight: FontWeight.w600,
+                                            if (done)
+                                              const Positioned(
+                                                top: 3,
+                                                right: 3,
+                                                child: Icon(
+                                                  Icons.check_circle,
+                                                  color: AppColors.green,
+                                                  size: 13,
                                                 ),
                                               ),
                                           ],
                                         ),
                                       ),
-                                      if (done)
-                                        const Positioned(
-                                          top: 3,
-                                          right: 3,
-                                          child: Icon(
-                                            Icons.check_circle,
-                                            color: AppColors.green,
-                                            size: 13,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
+                                    );
+                                  },
                                 ),
-                              );
-                            },
+                                const SizedBox(height: 8),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 8),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
 
             // ---- Bottom mini audio-bar (shows the last played form) ----
@@ -4049,6 +4215,7 @@ class _WordsScreenState extends State<WordsScreen> {
   ];
 
   final Map<int, Set<int>> completedPerCategory = {};
+  bool isLoadingProgress = true;
   // NEW: a category is locked until the previous category is fully done
   bool isCategoryLocked(int catIndex) {
     if (catIndex == 0) return false; // first category always unlocked
@@ -4071,10 +4238,37 @@ class _WordsScreenState extends State<WordsScreen> {
     }
   }
 
+  Future<void> loadCompletedProgress() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => isLoadingProgress = false);
+      return;
+    }
+    final doc = await FirebaseFirestore.instance
+        .collection('students')
+        .doc(user.uid)
+        .get();
+    final raw = doc.data()?['wordsCompletedCounts'] as Map<String, dynamic>?;
+    if (!mounted) return;
+    if (raw != null) {
+      for (int i = 0; i < categories.length; i++) {
+        final name = categories[i]['name'];
+        final count = raw[name] ?? 0;
+        if (count > 0) {
+          completedPerCategory[i] = Set.from(
+            List.generate(count as int, (j) => j),
+          );
+        }
+      }
+    }
+    setState(() => isLoadingProgress = false);
+  }
+
   @override
   void initState() {
     super.initState();
     loadStudentName();
+    loadCompletedProgress();
   }
 
   bool get allWordsDone {
@@ -4088,8 +4282,19 @@ class _WordsScreenState extends State<WordsScreen> {
       completedPerCategory.putIfAbsent(catIndex, () => {});
       completedPerCategory[catIndex]!.add(wordIndex);
     });
+
+    // Set the flag FIRST
     if (allWordsDone) {
       setState(() => ProgressData.instance.wordsDone = true);
+    }
+
+    // Then save — failures here no longer block the unlock
+    final Map<String, int> countsMap = {
+      for (int i = 0; i < categories.length; i++)
+        categories[i]['name']: completedPerCategory[i]?.length ?? 0,
+    };
+    await updateProgressInFirestore('wordsCompletedCounts', countsMap);
+    if (ProgressData.instance.wordsDone) {
       await updateProgressInFirestore('wordsDone', true);
     }
   }
@@ -4229,119 +4434,129 @@ class _WordsScreenState extends State<WordsScreen> {
               ),
 
             Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.1,
-                ),
-                itemCount: categories.length,
-                itemBuilder: (context, index) {
-                  final cat = categories[index];
-                  final words = cat['words'] as List;
-                  final doneCount = completedPerCategory[index]?.length ?? 0;
-                  final isDone = doneCount == words.length;
-                  final bool locked = isCategoryLocked(index); // NEW
-                  return GestureDetector(
-                    onTap: locked
-                        ? () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Complete the previous category first!',
-                                ),
+              child: isLoadingProgress
+                  ? const Center(
+                      child: CircularProgressIndicator(color: AppColors.green),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 12,
+                            mainAxisSpacing: 12,
+                            childAspectRatio: 1.1,
+                          ),
+                      itemCount: categories.length,
+                      itemBuilder: (context, index) {
+                        final cat = categories[index];
+                        final words = cat['words'] as List;
+                        final doneCount =
+                            completedPerCategory[index]?.length ?? 0;
+                        final isDone = doneCount == words.length;
+                        final bool locked = isCategoryLocked(index); // NEW
+                        return GestureDetector(
+                          onTap: locked
+                              ? () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Complete the previous category first!',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              : () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => WordCategoryScreen(
+                                      categoryName: cat['name'],
+                                      words: words.cast<Map<String, String>>(),
+                                      initialCompleted:
+                                          completedPerCategory[index] ?? {},
+                                      onWordCompleted: (wi) =>
+                                          onWordCompleted(index, wi),
+                                    ),
+                                  ),
+                                ).then((_) => setState(() {})),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: locked
+                                  ? Colors.grey[100]
+                                  : AppColors.cardCream,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: locked
+                                    ? Colors.grey[300]!
+                                    : isDone
+                                    ? AppColors.green
+                                    : AppColors.softBorder,
+                                width: isDone ? 2 : 1,
                               ),
-                            );
-                          }
-                        : () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => WordCategoryScreen(
-                                categoryName: cat['name'],
-                                words: words.cast<Map<String, String>>(),
-                                initialCompleted:
-                                    completedPerCategory[index] ?? {},
-                                onWordCompleted: (wi) =>
-                                    onWordCompleted(index, wi),
-                              ),
+                              boxShadow: locked
+                                  ? []
+                                  : [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
                             ),
-                          ).then((_) => setState(() {})),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: locked ? Colors.grey[100] : AppColors.cardCream,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: locked
-                              ? Colors.grey[300]!
-                              : isDone
-                              ? AppColors.green
-                              : AppColors.softBorder,
-                          width: isDone ? 2 : 1,
-                        ),
-                        boxShadow: locked
-                            ? []
-                            : [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                      ),
-                      child: Stack(
-                        children: [
-                          Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                            child: Stack(
                               children: [
-                                Text(
-                                  locked ? '🔒' : cat['emoji'],
-                                  style: TextStyle(
-                                    fontSize: 34,
-                                    color: locked ? Colors.grey[400] : null,
+                                Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        locked ? '' : cat['emoji'],
+                                        style: TextStyle(
+                                          fontSize: 34,
+                                          color: locked
+                                              ? Colors.grey[400]
+                                              : null,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        cat['name'],
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                          color: locked
+                                              ? Colors.grey
+                                              : AppColors.darkGreen,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      if (!locked)
+                                        Text(
+                                          '$doneCount / ${words.length}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.brown[400],
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  cat['name'],
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                    color: locked
-                                        ? Colors.grey
-                                        : AppColors.darkGreen,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                if (!locked)
-                                  Text(
-                                    '$doneCount / ${words.length}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.brown[400],
+                                if (isDone)
+                                  const Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Icon(
+                                      Icons.check_circle,
+                                      color: AppColors.green,
+                                      size: 18,
                                     ),
                                   ),
                               ],
                             ),
                           ),
-                          if (isDone)
-                            const Positioned(
-                              top: 8,
-                              right: 8,
-                              child: Icon(
-                                Icons.check_circle,
-                                color: AppColors.green,
-                                size: 18,
-                              ),
-                            ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ],
         ),
@@ -5448,188 +5663,216 @@ class _FacultyScreenState extends State<FacultyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Faculty Portal — ${widget.className}'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              setState(() => isLoading = true);
-              loadCompletedStudents();
-            },
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final bool? shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Exit App?'),
+            content: const Text(
+              'You will remain logged in. Do you want to exit the app?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Exit'),
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.swap_horiz),
-            tooltip: 'Switch Class',
-            onPressed: () {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const ClassAccessScreen(),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Logout',
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) {
-                Navigator.pushAndRemoveUntil(
+        );
+        if (shouldExit == true) {
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('Faculty Portal — ${widget.className}'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                setState(() => isLoading = true);
+                loadCompletedStudents();
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.swap_horiz),
+              tooltip: 'Switch Class',
+              onPressed: () {
+                Navigator.pushReplacement(
                   context,
-                  MaterialPageRoute(builder: (context) => const HomeScreen()),
-                  (route) => false,
+                  MaterialPageRoute(
+                    builder: (context) => const ClassAccessScreen(),
+                  ),
                 );
-              }
-            },
-          ),
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : completedStudents.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Logout',
+              onPressed: () async {
+                await FirebaseAuth.instance.signOut();
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (context) => const HomeScreen()),
+                    (route) => false,
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+        body: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : completedStudents.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('🧑‍🏫', style: TextStyle(fontSize: 60)),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No students in "${widget.className}" have completed the course yet.',
+                      style: const TextStyle(fontSize: 16, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              )
+            : Column(
                 children: [
-                  const Text('🧑‍🏫', style: TextStyle(fontSize: 60)),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No students in "${widget.className}" have completed the course yet.',
-                    style: const TextStyle(fontSize: 16, color: Colors.grey),
-                    textAlign: TextAlign.center,
+                  Container(
+                    width: double.infinity,
+                    color: Colors.green[50],
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      '🏆 ${completedStudents.length} student(s) completed in ${widget.className}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(12),
+                      itemCount: completedStudents.length,
+                      itemBuilder: (context, index) {
+                        final student = completedStudents[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: Colors.green[200]!),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      student['name'] ?? 'Unknown',
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.badge,
+                                      size: 16,
+                                      color: Colors.grey,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Reg No: ${student['registerNumber'] ?? '-'}',
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.email,
+                                      size: 16,
+                                      color: Colors.grey,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(student['email'] ?? '-'),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.phone,
+                                      size: 16,
+                                      color: Colors.grey,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(student['phone'] ?? '-'),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.star,
+                                      size: 16,
+                                      color: Colors.amber,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Quiz Score: ${student['quizScore'] ?? '-'} / 20',
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.calendar_today,
+                                      size: 16,
+                                      color: Colors.grey,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Completed: ${_formatDate(student['completedDate'])}',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
-            )
-          : Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  color: Colors.green[50],
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    '🏆 ${completedStudents.length} student(s) completed in ${widget.className}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: completedStudents.length,
-                    itemBuilder: (context, index) {
-                      final student = completedStudents[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(color: Colors.green[200]!),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    student['name'] ?? 'Unknown',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const Icon(
-                                    Icons.check_circle,
-                                    color: Colors.green,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.badge,
-                                    size: 16,
-                                    color: Colors.grey,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Reg No: ${student['registerNumber'] ?? '-'}',
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.email,
-                                    size: 16,
-                                    color: Colors.grey,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(student['email'] ?? '-'),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.phone,
-                                    size: 16,
-                                    color: Colors.grey,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(student['phone'] ?? '-'),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.star,
-                                    size: 16,
-                                    color: Colors.amber,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Quiz Score: ${student['quizScore'] ?? '-'} / 20',
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.calendar_today,
-                                    size: 16,
-                                    color: Colors.grey,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Completed: ${_formatDate(student['completedDate'])}',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
+      ),
     );
   }
 
