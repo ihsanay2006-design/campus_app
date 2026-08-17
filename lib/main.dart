@@ -10,6 +10,7 @@ import 'firebase_options.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'certificate/certificate_service.dart';
+import 'feedback_screen.dart';
 import 'package:flutter/services.dart'; // NEW — needed for SystemNavigator.pop()
 
 // ---------- APP COLORS (Kerala Theme — matched exactly from design) ----------
@@ -35,6 +36,7 @@ class ProgressData {
   bool wordsDone = false;
   bool quizPassed = false;
   int quizScore = 0;
+  bool feedbackSubmitted = false;
   bool certificateCompleted = false;
 
   // Calculates overall progress as a percentage (0.0 to 1.0)
@@ -261,6 +263,8 @@ void main() async {
         ProgressData.instance.wordsDone = data['wordsDone'] ?? false;
         ProgressData.instance.quizPassed = data['quizPassed'] ?? false;
         ProgressData.instance.quizScore = data['quizScore'] ?? 0;
+        ProgressData.instance.feedbackSubmitted =
+            data['feedbackSubmitted'] ?? false;
         ProgressData.instance.certificateCompleted = data['completed'] ?? false;
       }
     } catch (e) {
@@ -918,6 +922,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                                     0,
                                   ),
                                   'wordsCompletedCounts': <String, int>{},
+                                  'feedbackSubmitted': false,
+                                  'feedbackResponses': <String, int>{},
                                   'createdAt': FieldValue.serverTimestamp(),
                                 });
                             // NEW: role lookup doc — Security Rules check this
@@ -1905,6 +1911,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'locked': !ProgressData.instance.wordsDone,
       },
       {
+        'title': 'Feedback',
+        'icon': '📋',
+        'locked': !ProgressData.instance.quizPassed,
+      },
+      {
         'title': 'Certificate',
         'icon': '🏆',
         'locked': !ProgressData.instance.quizPassed,
@@ -2182,6 +2193,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) => const QuizScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              } else if (module['title'] == 'Feedback') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const FeedbackScreen(),
                                   ),
                                 ).then((_) => setState(() {}));
                               } else if (module['title'] == 'Certificate') {
@@ -5533,7 +5552,7 @@ class _CertificateScreenState extends State<CertificateScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Complete all modules and pass the quiz (≥ 65%) to unlock your certificate.',
+              'Complete all modules, pass the quiz (≥ 65%), and submit the feedback form to unlock your certificate.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.brown[400]),
             ),

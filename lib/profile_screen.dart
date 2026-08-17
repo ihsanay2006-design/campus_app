@@ -290,6 +290,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             'Quiz (score: ${ProgressData.instance.quizScore}/20)',
                             ProgressData.instance.quizPassed,
                           ),
+                          _ModuleCheck(
+                            'Feedback Form',
+                            ProgressData.instance.feedbackSubmitted,
+                          ),
                         ],
                       ),
                     ),
